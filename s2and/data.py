@@ -399,6 +399,33 @@ class ANDData:
         self.preprocess_signatures(name_counts_loaded)
         logger.info("preprocessed signatures")
 
+    def process_whole_dataset(self):
+        """
+        Call this function before calling the preprocessing function if you wish to preprocess ALL train/test/val pairs
+        """
+        N = len(self.signatures)
+        print("Dataset has total ", N, "signatures")
+        n = 0.8 * N
+        self.train_pairs_size = n * (n - 1) / 2
+        n = 0.1 * N
+        self.val_pairs_size = n * (n - 1) / 2
+        n = 0.1 * N
+        self.test_pairs_size = n * (n - 1) / 2
+
+
+    def get_signature_objects(self, signature_ids: Dict[str, List[str]]) -> Dict[str, List[Signature]]:
+        """
+        Returns a dict of blockId with a list of it's Signature objects, useful for qualitative analysis
+        """
+        signature_dict: Dict[str, List[Signature]] = {}
+        for block_id in signature_ids.keys():
+            signature_list: List[Signature] = []
+            for id in signature_ids[block_id]:
+                signature_list.append(self.signatures[id])
+            signature_dict[block_id] = signature_list
+        return signature_dict
+
+
     @staticmethod
     def get_full_name_for_features(signature: Signature, include_last: bool = True, include_suffix: bool = True) -> str:
         """
@@ -1077,6 +1104,56 @@ class ANDData:
 
         return train_pairs, val_pairs, test_pairs
 
+    def split_pairs_to_store(
+        self,
+        train_signatures: Dict[str, List[str]],
+        val_signatures: Dict[str, List[str]],
+        test_signatures: Dict[str, List[str]],
+    ) -> Tuple[
+        List[Tuple[str, str, Union[int, float]]],
+        List[Tuple[str, str, Union[int, float]]],
+        List[Tuple[str, str, Union[int, float]]],
+    ]:
+        """
+        creates pairs for the pairwise classification task
+
+        Parameters
+        ----------
+        train_signatures: Dict
+            the train block dict
+        val_signatures: Dict
+            the val block dict
+        test_signatures: Dict
+            the test block dict
+
+        Returns
+        -------
+        train/val/test pairs, where each pair is (signature_id_1, signature_id_2, label)
+        """
+        assert (
+            isinstance(train_signatures, dict)
+            and isinstance(val_signatures, dict)
+            and isinstance(test_signatures, dict)
+        )
+        train_blockwise_pairs = self.pair_sampling_to_store(
+            self.train_pairs_size,
+            [],
+            train_signatures,
+        )
+        val_blockwise_pairs = (
+            self.pair_sampling_to_store(
+                self.val_pairs_size,
+                [],
+                val_signatures,
+            )
+            if len(val_signatures) > 0
+            else []
+        )
+
+        test_blockwise_pairs = self.pair_sampling_to_store(self.test_pairs_size, [], test_signatures, self.all_test_pairs_flag)
+
+        return train_blockwise_pairs, val_blockwise_pairs, test_blockwise_pairs
+
     def construct_cluster_to_signatures(
         self,
         block_dict: Dict[str, List[str]],
@@ -1176,6 +1253,136 @@ class ANDData:
         return " ".join(name_parts)
 
     def pair_sampling(
+            self,
+            sample_size: int,
+            signature_ids: List[str],
+            blocks: Dict[str, List[str]],
+            all_pairs: bool = False,
+    ) -> List[Tuple[str, str, Union[int, float]]]:
+        """
+        Enumerates all pairs exhaustively, and samples pairs according to the four different strategies.
+        Parameters
+        ----------
+        sample_size: integer
+            The desired sample size
+        signature_ids: list
+            List of signature ids from which pairs can be sampled from.
+            List must be provided if blocking is not used
+        blocks: dict
+            It has block ids as keys, and list of signature ids under each block as values.
+            Must be provided when blocking is used
+        all_pairs: bool
+            Whether or not to return all pairs
+        Returns
+        -------
+        list: list of signature pairs
+        """
+        assert (
+                (not self.pair_sampling_block and self.pair_sampling_balanced_classes)
+                or (self.pair_sampling_block and self.pair_sampling_balanced_classes)
+                or (
+                        self.pair_sampling_block
+                        and not self.pair_sampling_balanced_homonym_synonym
+                        and not self.pair_sampling_balanced_classes
+                )
+        ), f"You chose sample within blocks? {self.pair_sampling_block}, sample balanced pos/neg?\
+             {self.pair_sampling_balanced_classes}, sample balanced homonym/synonym?\
+              {self.pair_sampling_balanced_homonym_synonym}. This is not a valid combination.\
+               Not using blocks and not doing balancing is not supported, and homonym/synonym\
+                balancing without pos/neg balancing is not supported"
+
+        same_name_different_cluster: List[Tuple[str, str, Union[int, float]]] = []
+        same_name_same_cluster: List[Tuple[str, str, Union[int, float]]] = []
+        different_name_same_cluster: List[Tuple[str, str, Union[int, float]]] = []
+        different_name_different_cluster: List[Tuple[str, str, Union[int, float]]] = []
+        possible: List[Tuple[str, str, Union[int, float]]] = []
+
+        if not self.pair_sampling_block:
+            for i, s1 in enumerate(signature_ids):
+                for s2 in signature_ids[i + 1:]:
+                    s1_name = self.get_full_name(s1)
+                    s2_name = self.get_full_name(s2)
+                    s1_cluster = self.signature_to_cluster_id[s1]
+                    s2_cluster = self.signature_to_cluster_id[s2]
+                    if s1_cluster == s2_cluster:
+                        if s1_name == s2_name:
+                            same_name_same_cluster.append((s1, s2, 1))
+                        else:
+                            different_name_same_cluster.append((s1, s2, 1))
+                    else:
+                        if s1_name == s2_name:
+                            same_name_different_cluster.append((s1, s2, 0))
+                        else:
+                            different_name_different_cluster.append((s1, s2, 0))
+        elif not self.pair_sampling_balanced_homonym_synonym and not self.pair_sampling_balanced_classes:
+            for _, signatures in blocks.items():
+                for i, s1 in enumerate(signatures):
+                    for s2 in signatures[i + 1:]:
+                        if self.signature_to_cluster_id is not None:
+                            s1_cluster = self.signature_to_cluster_id[s1]
+                            s2_cluster = self.signature_to_cluster_id[s2]
+                            if s1_cluster == s2_cluster:
+                                possible.append((s1, s2, 1))
+                            else:
+                                possible.append((s1, s2, 0))
+                        else:
+                            possible.append((s1, s2, NUMPY_NAN))
+        else:
+            for _, signatures in blocks.items():
+                for i, s1 in enumerate(signatures):
+                    for s2 in signatures[i + 1:]:
+                        s1_name = self.get_full_name(s1)
+                        s2_name = self.get_full_name(s2)
+                        s1_cluster = self.signature_to_cluster_id[s1]
+                        s2_cluster = self.signature_to_cluster_id[s2]
+                        if s1_cluster == s2_cluster:
+                            if s1_name == s2_name:
+                                same_name_same_cluster.append((s1, s2, 1))
+                            else:
+                                different_name_same_cluster.append((s1, s2, 1))
+                        else:
+                            if s1_name == s2_name:
+                                same_name_different_cluster.append((s1, s2, 0))
+                            else:
+                                different_name_different_cluster.append((s1, s2, 0))
+
+        if all_pairs:
+            if (
+                    self.pair_sampling_balanced_homonym_synonym
+                    or self.pair_sampling_balanced_classes
+                    or not self.pair_sampling_block
+            ):
+                all_pairs_output: List[Tuple[str, str, Union[int, float]]] = (
+                        same_name_different_cluster
+                        + same_name_same_cluster
+                        + different_name_same_cluster
+                        + different_name_different_cluster
+                )
+                return all_pairs_output
+            else:
+                return possible
+        else:
+            if self.pair_sampling_balanced_classes:
+                pairs = sampling(
+                    same_name_different_cluster,
+                    different_name_same_cluster,
+                    same_name_same_cluster,
+                    different_name_different_cluster,
+                    sample_size,
+                    self.pair_sampling_balanced_homonym_synonym,
+                    self.random_seed,
+                )
+            elif (
+                    self.pair_sampling_block
+                    and not self.pair_sampling_balanced_classes
+                    and not self.pair_sampling_balanced_homonym_synonym
+            ):
+                sample_size = min(len(possible), sample_size)
+                pairs = random_sampling(possible, sample_size, self.random_seed)
+
+            return pairs
+
+    def pair_sampling_to_store(
         self,
         sample_size: int,
         signature_ids: List[str],
@@ -1200,6 +1407,7 @@ class ANDData:
 
         Returns
         -------
+        Tuple of 2 lists
         list: list of signature pairs
         """
         assert (
@@ -1222,7 +1430,10 @@ class ANDData:
         different_name_different_cluster: List[Tuple[str, str, Union[int, float]]] = []
         possible: List[Tuple[str, str, Union[int, float]]] = []
 
-        if not self.pair_sampling_block:
+        # Return block-wise Signature pairs in a dict
+        blockwise_sig_pairs: Dict[str, List[Tuple[str, str, Union[int, float]]]] = {}
+
+        if not self.pair_sampling_block: #Ignored for s2 Block featurization
             for i, s1 in enumerate(signature_ids):
                 for s2 in signature_ids[i + 1 :]:
                     s1_name = self.get_full_name(s1)
@@ -1239,8 +1450,9 @@ class ANDData:
                             same_name_different_cluster.append((s1, s2, 0))
                         else:
                             different_name_different_cluster.append((s1, s2, 0))
-        elif not self.pair_sampling_balanced_homonym_synonym and not self.pair_sampling_balanced_classes:
-            for _, signatures in blocks.items():
+        elif not self.pair_sampling_balanced_homonym_synonym and not self.pair_sampling_balanced_classes: #Important for Blockwise featurization
+            for block_id, signatures in blocks.items():
+                sig_pairs: List[Tuple[str, str, Union[int, float]]] = []
                 for i, s1 in enumerate(signatures):
                     for s2 in signatures[i + 1 :]:
                         if self.signature_to_cluster_id is not None:
@@ -1248,10 +1460,15 @@ class ANDData:
                             s2_cluster = self.signature_to_cluster_id[s2]
                             if s1_cluster == s2_cluster:
                                 possible.append((s1, s2, 1))
+                                sig_pairs.append((s1, s2, 1))
                             else:
                                 possible.append((s1, s2, 0))
+                                sig_pairs.append((s1, s2, 0))
                         else:
                             possible.append((s1, s2, NUMPY_NAN))
+                            sig_pairs.append((s1, s2, NUMPY_NAN))
+                blockwise_sig_pairs[block_id] = sig_pairs
+
         else:
             for _, signatures in blocks.items():
                 for i, s1 in enumerate(signatures):
@@ -1270,8 +1487,7 @@ class ANDData:
                                 same_name_different_cluster.append((s1, s2, 0))
                             else:
                                 different_name_different_cluster.append((s1, s2, 0))
-
-        if all_pairs:
+        if all_pairs: # TODO: Need to update this for mode=inference
             if (
                 self.pair_sampling_balanced_homonym_synonym
                 or self.pair_sampling_balanced_classes
@@ -1302,8 +1518,15 @@ class ANDData:
                 and not self.pair_sampling_balanced_classes
                 and not self.pair_sampling_balanced_homonym_synonym
             ):
+                # Take samples from each block weighted by their len of total samples
                 sample_size = min(len(possible), sample_size)
-                pairs = random_sampling(possible, sample_size, self.random_seed)
+                blockwise_pairs: Dict[str, List[Tuple[str, str, Union[int, float]]]] = {}
+                for k in blockwise_sig_pairs.keys():
+                    block_sample_size = int(sample_size * len(blockwise_sig_pairs[k])/len(possible))
+                    samples = random_sampling(blockwise_sig_pairs[k], block_sample_size, self.random_seed)
+                    if(len(samples)>0):
+                        blockwise_pairs[k] = samples
+                return blockwise_pairs
 
             return pairs
 
