@@ -1,15 +1,16 @@
-from typing import Union, Dict
-from typing import List
+from typing import Dict
 from typing import Tuple
 
 import hummingbird
 import torch
 from hummingbird.ml import constants
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 
+from pipeline.mlp_layer import MlpLayer
 from s2and.consts import PREPROCESSED_DATA_DIR
 import pickle
 import numpy as np
+from s2and.data import S2BlocksDataset
 
 #DATA_HOME_DIR = "/Users/pprakash/PycharmProjects/prob-ent-resolution/data/S2AND"
 DATA_HOME_DIR = "/work/pi_mccallum_umass_edu/pragyaprakas_umass_edu/prob-ent-resolution/data"
@@ -19,25 +20,10 @@ def read_blockwise_features(pkl):
     with open(pkl,"rb") as _pkl_file:
         blockwise_data = pickle.load(_pkl_file)
 
-    print(list(blockwise_data.keys())[0])
-    print(len(blockwise_data.keys()))
-    print(blockwise_data)
+    print("Total num of blocks:", len(blockwise_data.keys()))
     return blockwise_data
 
-class s2BlocksDataset(Dataset):
-    def __init__(self, blockwise_data: Dict[str, Tuple[np.ndarray, np.ndarray]]):
-        self.blockwise_data = blockwise_data
 
-    def __len__(self):
-        return len(self.blockwise_data.keys())
-
-
-    def __getitem__(self, idx):
-        dict_key = list(self.blockwise_data.keys())[idx]
-        X, y = self.blockwise_data[dict_key]
-        # TODO: Add subsampling logic here
-
-        return (X, y)
 
 def load_pretrained_model_to_torch():
     with open(f"{DATA_HOME_DIR}/production_model.pickle", "rb") as _pkl_file:
@@ -72,9 +58,20 @@ def train(model, train_Dataloader):
 
         # MOVING THE TENSORS TO THE CONFIGURED DEVICE
         data, target = data.to(device), target.to(device)
+        # Reshape data to 2-D matrix, and target to 1D
+        n = np.shape(data)[1]
+        f = np.shape(data)[2]
+        if(n<=1):
+            continue
+        data = torch.reshape(data, (n, f))
+        target = torch.reshape(target, (n,))
+        print(data.size(), data.size())
 
         # FORWARD PASS
         output = predict_class(model, data)
+        # Change dtype to float for BCE Loss
+        target = target.to(torch.float64)
+        output = output.to(torch.float64)
         loss = loss_fn(output, target)
 
         # BACKWARD AND OPTIMIZE
@@ -86,7 +83,7 @@ def train(model, train_Dataloader):
         # Print batch loss
         with torch.no_grad():
             model.eval()
-            print("\tBatch", f":{idx}", ":", loss_fn(predict_class(model, data), target).item())
+            print("\tBatch", f":{idx}", ":", loss_fn(predict_class(model, data).to(torch.float64), target).item())
         model.train()
 
         print("Accuracy on training set is",
@@ -106,8 +103,8 @@ if __name__=='__main__':
     test_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset}/seed1/test_features.pkl"
     blockwise_features = read_blockwise_features(train_pkl)
 
-    train_Dataset = s2BlocksDataset(blockwise_features)
+    train_Dataset = S2BlocksDataset(blockwise_features)
     train_Dataloader = DataLoader(train_Dataset, shuffle=True)
 
-    lgbm_hm = load_pretrained_model_to_torch()
+    lgbm_hm = MlpLayer()
     model = train(lgbm_hm, train_Dataloader)
