@@ -76,8 +76,6 @@ def read_blockwise_features(pkl):
     blockwise_data: Dict[str, Tuple[np.ndarray, np.ndarray]]
     with open(pkl,"rb") as _pkl_file:
         blockwise_data = pickle.load(_pkl_file)
-
-    print("Total num of blocks:", len(blockwise_data.keys()))
     return blockwise_data
 
 
@@ -146,13 +144,13 @@ def evaluate(model, dataloader, overfit_batch_idx=-1):
             if idx > overfit_batch_idx:
                 break
         data, target, cluster_ids = batch
+        data = data.reshape(-1, n_features).float()
         if data.shape[0] == 0:
             # Only one signature in block -> predict correctly
             v_measure.append(1.)
             b3_f1.append(1.)
             sigs_per_block.append(1)
         else:
-            data = data.reshape(-1, n_features).float()
             block_size = get_matrix_size_from_triu(data)
             cluster_ids = np.reshape(cluster_ids, (block_size, ))
             target = target.flatten().float()
@@ -172,7 +170,8 @@ def evaluate(model, dataloader, overfit_batch_idx=-1):
     b3_f1 = np.array(b3_f1)
     sigs_per_block = np.array(sigs_per_block)
 
-    return np.sum(v_measure * sigs_per_block) / sigs_per_block.sum(), np.sum(b3_f1 * sigs_per_block) / sigs_per_block.sum()
+    return np.sum(v_measure * sigs_per_block) / np.sum(sigs_per_block), \
+           np.sum(b3_f1 * sigs_per_block) / np.sum(sigs_per_block)
 
 
 def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, group=None,
@@ -277,10 +276,11 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                                                                            mode='min',
                                                                            factor=hyp['lr_factor'],
                                                                            min_lr=hyp['lr_min'],
-                                                                           patience=hyp['lr_scheduler_patience'])
+                                                                           patience=hyp['lr_scheduler_patience'],
+                                                                           verbose=True)
                 elif hyp['lr_scheduler'] == 'step':
                     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=hyp['lr_step_size'],
-                                                                gamma=hyp['lr_gamma'])
+                                                                gamma=hyp['lr_gamma'], verbose=True)
 
             best_dev_state_dict = None
             best_dev_score = -1  # Stores the score of only the specified optimization metric
@@ -415,16 +415,24 @@ if __name__ == '__main__':
     parser = Parser(add_training_args=True)
     # Handle additional arbitrary arguments
     _, unknown = parser.parse_known_args()
+    make_false_args = []
     for arg in unknown:
         if arg.startswith("--"):
-            argument_name = arg.split('=')[0]
+            arg_split = arg.split('=')
+            argument_name = arg_split[0]
             if argument_name[2:] in DEFAULT_HYPERPARAMS:
                 argument_type = type(DEFAULT_HYPERPARAMS[argument_name[2:]])
                 if argument_type == bool:
-                    parser.add_argument(argument_name, action='store_true')
+                    if len(arg_split) > 1 and arg_split[1].lower() == 'false':
+                        parser.add_argument(argument_name, type=str)
+                        make_false_args.append(argument_name[2:])
+                    else:
+                        parser.add_argument(argument_name, action='store_true')
                 else:
                     parser.add_argument(argument_name, type=argument_type)
     args = parser.parse_args().__dict__
+    for false_arg in make_false_args:
+        args[false_arg] = False
     hyp_args = {k: v for k, v in args.items() if k in DEFAULT_HYPERPARAMS}
     logger.info("Script arguments:")
     logger.info(args)
@@ -435,7 +443,7 @@ if __name__ == '__main__':
         device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
-    print(f"Using device={device}")
+    logger.info(f"Using device={device}")
 
     wandb.login()
     if args['wandb_sweep_params'] is not None:
