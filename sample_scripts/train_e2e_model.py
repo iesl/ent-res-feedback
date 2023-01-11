@@ -137,7 +137,7 @@ def compute_b3_f1(true_cluster_ids, pred_cluster_ids):
 def evaluate(model, dataloader, overfit_batch_idx=-1):
     n_features = dataloader.dataset[0][0].shape[1]
     v_measure, b3_f1, sigs_per_block = [], [], []
-    for (idx, batch) in tqdm(enumerate(dataloader), desc='Evaluating'):
+    for (idx, batch) in enumerate(tqdm(dataloader, desc='Evaluating')):
         if overfit_batch_idx > -1:
             if idx < overfit_batch_idx:
                 continue
@@ -307,7 +307,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
             for i in range(n_epochs):
                 wandb.log({'epoch': i + 1})
                 running_loss = []
-                for (idx, batch) in enumerate(train_dataloader):
+                for (idx, batch) in enumerate(tqdm(train_dataloader), desc="Training"):
                     if overfit_batch_idx > -1:
                         if idx < overfit_batch_idx:
                             continue
