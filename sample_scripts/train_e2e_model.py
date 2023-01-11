@@ -138,7 +138,7 @@ def compute_b3_f1(true_cluster_ids, pred_cluster_ids):
 
 def evaluate(model, dataloader, overfit_batch_idx=-1):
     n_features = dataloader.dataset[0][0].shape[1]
-    v_measure, b3_f1 = [], []
+    v_measure, b3_f1, sigs_per_block = [], [], []
     for (idx, batch) in tqdm(enumerate(dataloader), desc='Evaluating'):
         if overfit_batch_idx > -1:
             if idx < overfit_batch_idx:
@@ -146,27 +146,38 @@ def evaluate(model, dataloader, overfit_batch_idx=-1):
             if idx > overfit_batch_idx:
                 break
         data, target, cluster_ids = batch
-        data = data.reshape(-1, n_features).float()
-        block_size = get_matrix_size_from_triu(data)
-        cluster_ids = np.reshape(cluster_ids, (block_size, ))
-        target = target.flatten().float()
+        if data.shape[0] == 0:
+            # Only one signature in block -> predict correctly
+            v_measure.append(1.)
+            b3_f1.append(1.)
+            sigs_per_block.append(1)
+        else:
+            data = data.reshape(-1, n_features).float()
+            block_size = get_matrix_size_from_triu(data)
+            cluster_ids = np.reshape(cluster_ids, (block_size, ))
+            target = target.flatten().float()
+            sigs_per_block.append(block_size)
 
-        # Forward pass through the e2e model
-        data, target = data.to(device), target.to(device)
-        _ = model(data, block_size)
-        predicted_cluster_ids = model.hac_cut_layer.cluster_labels.detach()
+            # Forward pass through the e2e model
+            data, target = data.to(device), target.to(device)
+            _ = model(data, block_size)
+            predicted_cluster_ids = model.hac_cut_layer.cluster_labels.detach()
 
-        # Compute clustering metrics
-        v_measure.append(v_measure_score(predicted_cluster_ids, cluster_ids))
-        b3_f1_metrics = compute_b3_f1(cluster_ids, predicted_cluster_ids)
-        b3_f1.append(b3_f1_metrics[2])
+            # Compute clustering metrics
+            v_measure.append(v_measure_score(predicted_cluster_ids, cluster_ids))
+            b3_f1_metrics = compute_b3_f1(cluster_ids, predicted_cluster_ids)
+            b3_f1.append(b3_f1_metrics[2])
 
-    return np.mean(v_measure), np.mean(b3_f1)
+    v_measure = np.array(v_measure)
+    b3_f1 = np.array(b3_f1)
+    sigs_per_block = np.array(sigs_per_block)
+
+    return np.sum(v_measure * sigs_per_block) / sigs_per_block.sum(), np.sum(b3_f1 * sigs_per_block) / sigs_per_block.sum()
 
 
 def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, group=None,
           save_model=False, load_model_from_wandb_run=None, load_model_from_fpath=None,
-          eval_only_split=None):
+          eval_only_split=None, skip_initial_eval=False):
     init_args = {
         'config': DEFAULT_HYPERPARAMS
     }
@@ -225,11 +236,6 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                                 neumiss_deq, hidden_dim, n_hidden_layers, add_batchnorm, activation,
                                 negative_slope, hidden_config, sdp_max_iters, sdp_eps)
         logger.info(f"Model loaded: {e2e_model}", )
-        if verbose:
-            logger.info("Learnable parameters:")
-            for name, parameter in e2e_model.named_parameters():
-                if parameter.requires_grad:
-                    logger.info(name)
 
         # Load stored model, if available
         state_dict = None
@@ -281,23 +287,25 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
             best_dev_scores = None  # Contains scores of all metrics
             best_epoch = 0
 
-            # Get initial model performance on dev (or 'train' for overfitting runs)
-            with torch.no_grad():
-                e2e_model.eval()
-                if overfit_batch_idx > -1:
-                    train_scores = evaluate(e2e_model, train_dataloader, overfit_batch_idx)
-                    if verbose:
-                        logger.info(f"Initial: train_vmeasure={train_scores[0]}, train_b3_f1={train_scores[1]}")
-                    wandb.log({'epoch': 0, 'train_vmeasure': train_scores[0], 'train_b3_f1': train_scores[1]})
-                else:
-                    dev_scores = evaluate(e2e_model, val_dataloader)
-                    if verbose:
-                        logger.info(f"Initial: dev_vmeasure={dev_scores[0]}, dev_b3_f1={dev_scores[1]}")
-                    wandb.log({'epoch': 0, 'dev_vmeasure': dev_scores[0], 'dev_b3_f1': dev_scores[1]})
+            if not skip_initial_eval:
+                # Get initial model performance on dev (or 'train' for overfitting runs)
+                with torch.no_grad():
+                    e2e_model.eval()
+                    if overfit_batch_idx > -1:
+                        train_scores = evaluate(e2e_model, train_dataloader, overfit_batch_idx)
+                        if verbose:
+                            logger.info(f"Initial: train_vmeasure={train_scores[0]}, train_b3_f1={train_scores[1]}")
+                        wandb.log({'epoch': 0, 'train_vmeasure': train_scores[0], 'train_b3_f1': train_scores[1]})
+                    else:
+                        dev_scores = evaluate(e2e_model, val_dataloader)
+                        if verbose:
+                            logger.info(f"Initial: dev_vmeasure={dev_scores[0]}, dev_b3_f1={dev_scores[1]}")
+                        wandb.log({'epoch': 0, 'dev_vmeasure': dev_scores[0], 'dev_b3_f1': dev_scores[1]})
 
             e2e_model.train()
             start_time = time.time()  # Tracks full training runtime
             for i in range(n_epochs):
+                wandb.log({'epoch': i + 1})
                 running_loss = []
                 for (idx, batch) in enumerate(train_dataloader):
                     if overfit_batch_idx > -1:
@@ -307,15 +315,17 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                             break
                     data, target, _ = batch
                     data = data.reshape(-1, n_features).float()
+                    if data.shape[0] == 0:
+                        # Block contains only one signature
+                        continue
+                    if add_batchnorm and data.shape[0] == 1:
+                        # Block contains only one signature pair; batchnorm throws error
+                        continue
                     block_size = get_matrix_size_from_triu(data)
                     target = target.flatten().float()
                     if verbose:
-                        logger.info(f"input shape: {data.shape}")
-                        logger.info(f"input matrix size: {block_size}")
-                        logger.info(f"target shape: {target.shape}")
-
-                    if data.shape[0] == 1:
-                        pass  # TODO: Fix this scenario
+                        logger.info(f"Batch shape: {data.shape}")
+                        logger.info(f"Batch matrix size: {block_size}")
 
                     # Forward pass through the e2e model
                     data, target = data.to(device), target.to(device)
@@ -324,10 +334,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                     # Calculate the loss
                     gold_output = uncompress_target_tensor(target)
                     if verbose:
-                        logger.info("predicted output:")
-                        logger.info(output)
-                        logger.info("gold output:")
-                        logger.info(gold_output)
+                        logger.info(f"Gold:\n{gold_output}")
 
                     loss = torch.norm(gold_output - output) / (2 * block_size)
 
@@ -336,11 +343,12 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                     optimizer.step()
 
                     if verbose:
-                        logger.info(f"loss = {loss.item()}")
+                        logger.info(f"Loss = {loss.item()}")
                     running_loss.append(loss.item())
+                    wandb.log({'train_loss': np.mean(running_loss)})
 
                 if verbose:
-                    logger.info(f"epoch loss = {np.mean(running_loss)}")
+                    logger.info(f"Epoch loss = {np.mean(running_loss)}")
 
                 # Get model performance on dev (or 'train' for overfitting runs)
                 with torch.no_grad():
@@ -349,9 +357,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                         train_scores = evaluate(e2e_model, train_dataloader, overfit_batch_idx)
                         if verbose:
                             logger.info(f"Epoch {i + 1}: train_vmeasure={train_scores[0]}, train_b3_f1={train_scores[1]}")
-                        wandb.log(
-                            {'epoch': i + 1, 'train_loss_epoch': np.mean(running_loss), 'train_vmeasure': train_scores[0],
-                             'train_b3_f1': train_scores[1]})
+                        wandb.log({'train_vmeasure': train_scores[0], 'train_b3_f1': train_scores[1]})
                         if use_lr_scheduler:
                             if hyp['lr_scheduler'] == 'plateau':
                                 scheduler.step(train_scores[eval_metric_to_idx[dev_opt_metric]])
@@ -360,9 +366,8 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                     else:
                         dev_scores = evaluate(e2e_model, val_dataloader)
                         if verbose:
-                            logger.info(f"Epoch {i + 1}: dev_vmeasure={dev_scores[0]}, dev_b3_f1={dev_scores[1]}")
-                        wandb.log({'epoch': i + 1, 'train_loss_epoch': np.mean(running_loss), 'dev_vmeasure': dev_scores[0],
-                                   'dev_b3_f1': dev_scores[1]})
+                            logger.info(f"epoch {i + 1}: dev_vmeasure={dev_scores[0]}, dev_b3_f1={dev_scores[1]}")
+                        wandb.log({'dev_vmeasure': dev_scores[0], 'dev_b3_f1': dev_scores[1]})
                         dev_opt_score = dev_scores[eval_metric_to_idx[dev_opt_metric]]
                         if dev_opt_score > best_dev_score:
                             if verbose:
@@ -486,5 +491,6 @@ if __name__ == '__main__':
               save_model=args['save_model'],
               load_model_from_wandb_run=args['load_model_from_wandb_run'],
               load_model_from_fpath=args['load_model_from_fpath'],
-              eval_only_split=args['eval_only_split'])
+              eval_only_split=args['eval_only_split'],
+              skip_initial_eval=args['skip_initial_eval'])
         logger.info("End of run")

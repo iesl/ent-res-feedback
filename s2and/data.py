@@ -38,6 +38,7 @@ from s2and.text import (
     NAME_PREFIXES,
     DROPPED_AFFIXES,
 )
+from IPython import embed
 
 logger = logging.getLogger("s2and")
 
@@ -147,7 +148,8 @@ class S2BlocksDataset(Dataset):
         if self.convert_nan:
             np.nan_to_num(X, copy=False, nan=self.nan_value)
         if self.scale and self.scaler is not None:
-            X = self.scaler.transform(X)
+            if X.shape[0] != 0:
+                X = self.scaler.transform(X)
         return X, y, clusterIds
 
 class ANDData:
