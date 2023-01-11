@@ -38,15 +38,15 @@ DEFAULT_HYPERPARAMS = {
     # Run config
     "run_random_seed": 17,
     # Data config
-    "convert_nan": True,
+    "convert_nan": False,
     "nan_value": -1,
     "drop_feat_nan_pct": -1,
-    "normalize_data": False,
+    "normalize_data": True,
     # Model config
     "neumiss_deq": False,
     "neumiss_depth": 20,
-    "hidden_dim": 1024,
-    "n_hidden_layers": 1,
+    "hidden_dim": 512,
+    "n_hidden_layers": 2,
     "dropout_p": 0.1,
     "dropout_only_once": True,
     "batchnorm": True,
@@ -57,17 +57,17 @@ DEFAULT_HYPERPARAMS = {
     "sdp_max_iters": 50000,
     "sdp_eps": 1e-3,
     # Training config
-    "lr": 1e-5,
-    "n_epochs": 10,
+    "lr": 1e-4,
+    "n_epochs": 5,
     # "weighted_loss": True,
     "use_lr_scheduler": True,
     "lr_scheduler": "plateau",  # "step"
-    "lr_factor": 0.6,
+    "lr_factor": 0.7,
     "lr_min": 1e-6,
     "lr_scheduler_patience": 10,
     "lr_step_size": 200,
     "lr_gamma": 0.1,
-    "weight_decay": 0.,
+    "weight_decay": 0.01,
     "dev_opt_metric": 'b3_f1',
     "overfit_batch_idx": -1  # 35
 }
