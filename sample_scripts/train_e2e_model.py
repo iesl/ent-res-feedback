@@ -307,7 +307,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
             for i in range(n_epochs):
                 wandb.log({'epoch': i + 1})
                 running_loss = []
-                for (idx, batch) in enumerate(tqdm(train_dataloader), desc="Training"):
+                for (idx, batch) in enumerate(tqdm(train_dataloader, desc="Training")):
                     if overfit_batch_idx > -1:
                         if idx < overfit_batch_idx:
                             continue
