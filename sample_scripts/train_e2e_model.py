@@ -411,6 +411,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
             torch.save(best_dev_state_dict, os.path.join(run.dir, 'model_state_dict_best.pt'))
             wandb.save('model_state_dict_best.pt')
 
+        logger.info(f"Run directory: {run.dir}")
         logger.info("End of train() call")
 
 
