@@ -165,8 +165,7 @@ class S2BlocksDataset(Dataset):
 
         # Sub-sampling
         if X.shape[0] != 0 and self.subsample_sz > -1:
-            matrix_sz = self.get_matrix_size_from_triu(X)  # len(clusterIds)  # TODO: Remove assert after verifying
-            assert matrix_sz == len(clusterIds)
+            matrix_sz = len(clusterIds)
             if matrix_sz > self.subsample_sz:
                 n_to_remove = matrix_sz - self.subsample_sz
                 matrix_idxs_to_remove = np.random.choice(range(matrix_sz), n_to_remove, replace=False)
@@ -178,11 +177,9 @@ class S2BlocksDataset(Dataset):
                 keep_mask[idxs_to_remove] = 0
                 X = X[keep_mask == 1]
                 y = y[keep_mask == 1]
-                assert self.get_matrix_size_from_triu(X) == self.subsample_sz
                 keep_mask = np.ones(len(clusterIds), dtype=int)
                 keep_mask[matrix_idxs_to_remove] = 0
                 clusterIds = list(np.array(clusterIds)[keep_mask == 1])
-                assert len(clusterIds) == self.subsample_sz
         return X, y, clusterIds
 
 class ANDData:
