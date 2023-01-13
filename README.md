@@ -53,15 +53,13 @@ The signatures pickle contains all the metadata for each signature in a block.
 
 Sample command:
 ```commandline
-python pipeline/preprocess_s2and_data.py --data_home_dir="./data" --dataset_name="pubmed"
+python e2e_scripts/preprocess_s2and_data.py --data_home_dir="./data" --dataset_name="pubmed"
 ```
 
 ## End-to-end model training
-The end-to-end model is defined in file pipeline/model.py. For training of this model, run python script
-sample_scripts/train_e2e_model.py
+The end-to-end model is defined in file e2e_pipeline/model.py. For training this model, run `e2e_scripts/train.py`
 
-Sample Command:
+Sample command for single-runs:
 ```commandline
-python sample_scripts/train_e2e_model.py --wandb_run_params=configs/wandb_overfit_1_batch.json
+python e2e_scripts/train.py --wandb_run_params=wandb_configs/wandb_overfit_1_batch.json
 ```
-

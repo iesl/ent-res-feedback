@@ -6,7 +6,7 @@ import torch
 from hummingbird.ml import constants
 from torch.utils.data import DataLoader
 
-from pipeline.mlp_layer import MLPLayer
+from e2e_pipeline.mlp_layer import MLPLayer
 from s2and.consts import PREPROCESSED_DATA_DIR
 import pickle
 import numpy as np

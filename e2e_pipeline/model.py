@@ -1,10 +1,10 @@
 import torch
 
-from pipeline.mlp_layer import MLPLayer
-from pipeline.sdp_layer import SDPLayer
-from pipeline.hac_cut_layer import HACCutLayer
-from pipeline.trellis_cut_layer import TrellisCutLayer
-from pipeline.uncompress_layer import UncompressTransformLayer
+from e2e_pipeline.mlp_layer import MLPLayer
+from e2e_pipeline.sdp_layer import SDPLayer
+from e2e_pipeline.hac_cut_layer import HACCutLayer
+from e2e_pipeline.trellis_cut_layer import TrellisCutLayer
+from e2e_pipeline.uncompress_layer import UncompressTransformLayer
 import logging
 from IPython import embed
 

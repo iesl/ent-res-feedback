@@ -17,7 +17,7 @@ import numpy as np
 from sklearn.metrics.cluster import v_measure_score
 from tqdm import tqdm
 
-from pipeline.model import EntResModel
+from e2e_pipeline.model import EntResModel
 from s2and.consts import PREPROCESSED_DATA_DIR
 from s2and.data import S2BlocksDataset
 from s2and.eval import b3_precision_recall_fscore

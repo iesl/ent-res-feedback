@@ -8,8 +8,8 @@ import wandb
 import copy
 from torch.utils.data import DataLoader
 
-from pipeline.model import EntResModel
-from pipeline.trellis_cut_layer import TrellisCutLayer
+from e2e_pipeline.model import EntResModel
+from e2e_pipeline.trellis_cut_layer import TrellisCutLayer
 from s2and.consts import PREPROCESSED_DATA_DIR
 import pickle
 import numpy as np
