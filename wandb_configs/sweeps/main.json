@@ -6,7 +6,7 @@
     "neumiss_depth": {"values": [5, 10, 20]},
     "hidden_dim": {"values": [256, 512, 1024]},
     "n_hidden_layers": {"values": [1, 2]},
-    "dropout": {"values": [0, 0.1, 0.2, 0.3, 0.4, 0.5]},
+    "dropout_p": {"values": [0, 0.1, 0.2, 0.3, 0.4, 0.5]},
     "batchnorm": {"values": [true, false]},
     "use_lr_scheduler": {"values": [true, false]},
     "lr_scheduler": {"values": ["plateau", "step"]},
