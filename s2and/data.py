@@ -494,19 +494,6 @@ class ANDData:
         self.preprocess_signatures(name_counts_loaded)
         logger.info("preprocessed signatures")
 
-    def process_whole_dataset(self):
-        """
-        Call this function before calling the preprocessing function if you wish to preprocess ALL train/test/val pairs
-        """
-        N = len(self.signatures)
-        print("Dataset has total ", N, "signatures")
-        n = 0.8 * N
-        self.train_pairs_size = n * (n - 1) / 2
-        n = 0.1 * N
-        self.val_pairs_size = n * (n - 1) / 2
-        n = 0.1 * N
-        self.test_pairs_size = n * (n - 1) / 2
-
 
     def get_signature_objects(self, signature_ids: Dict[str, List[str]]) -> Dict[str, List[Signature]]:
         """
@@ -1230,12 +1217,12 @@ class ANDData:
             and isinstance(val_signatures, dict)
             and isinstance(test_signatures, dict)
         )
-        train_blockwise_pairs, train_blockwise_clusterIds = self.pair_sampling_to_store(
+        train_signatures, train_blockwise_pairs, train_blockwise_clusterIds = self.pair_sampling_to_store(
             self.train_pairs_size,
             [],
             train_signatures,
         )
-        val_blockwise_pairs, val_blockwise_clusterIds = (
+        val_signatures, val_blockwise_pairs, val_blockwise_clusterIds = (
             self.pair_sampling_to_store(
                 self.val_pairs_size,
                 [],
@@ -1245,14 +1232,15 @@ class ANDData:
             else []
         )
 
-        test_blockwise_pairs, test_blockwise_clusterIds = self.pair_sampling_to_store(
+        test_signatures, test_blockwise_pairs, test_blockwise_clusterIds = self.pair_sampling_to_store(
             self.test_pairs_size,
             [],
             test_signatures,
             self.all_test_pairs_flag
         )
 
-        return train_blockwise_pairs, train_blockwise_clusterIds, \
+        return train_signatures, val_signatures, test_signatures, \
+               train_blockwise_pairs, train_blockwise_clusterIds, \
                val_blockwise_pairs, val_blockwise_clusterIds, \
                test_blockwise_pairs, test_blockwise_clusterIds
 
@@ -1482,7 +1470,23 @@ class ANDData:
                 sample_size = min(len(possible), sample_size)
                 pairs = random_sampling(possible, sample_size, self.random_seed)
 
+                # if not os.path.exists("s2and_data_subsample.pkl"):
+                #     subsample_id_set = set()
+                #     for tuple in pairs:
+                #         id1, id2, _ = tuple
+                #         subsample_id_set.add(id1)
+                #         subsample_id_set.add(id2)
+                #
+                #     with open('s2and_data_subsample.pkl', 'wb') as f:
+                #         pickle.dump(subsample_id_set, f)
+
             return pairs
+
+    @staticmethod
+    def get_indices_by_matrix_idx(K, n):
+        first_pos = list(range(K * (n - 1) - K * (K - 1) // 2, K * (n - 1) - K * (K - 1) // 2 + (n - K - 2) + 1))
+        second_pos = [k * (n - 1) - k * (k - 1) // 2 + K - k - 1 for k in range(K)]
+        return first_pos + second_pos
 
     def pair_sampling_to_store(
         self,
@@ -1536,6 +1540,7 @@ class ANDData:
         blockwise_sig_pairs: Dict[str, List[Tuple[str, str, Union[int, float]]]] = {}
         # Return block-wise cluster_ids
         blockwise_cluster_ids: Dict[str, List[str]] = {}
+        blockwise_sig_ids: Dict[str, List[str]] = {}
 
         if not self.pair_sampling_block: #Ignored for s2 Block featurization
             for i, s1 in enumerate(signature_ids):
@@ -1561,7 +1566,7 @@ class ANDData:
                 for i, s1 in enumerate(signatures):
                     s1_cluster = self.signature_to_cluster_id[s1]
                     cluster_ids.append(s1_cluster)
-                    for s2 in signatures[i + 1 :]:
+                    for j, s2 in enumerate(signatures[i + 1 :]):
                         if self.signature_to_cluster_id is not None:
                             s2_cluster = self.signature_to_cluster_id[s2]
                             if s1_cluster == s2_cluster:
@@ -1575,6 +1580,7 @@ class ANDData:
                             sig_pairs.append((s1, s2, NUMPY_NAN))
                 blockwise_sig_pairs[block_id] = sig_pairs
                 blockwise_cluster_ids[block_id] = cluster_ids
+                blockwise_sig_ids[block_id] = signatures
 
         else:
             for _, signatures in blocks.items():
@@ -1594,6 +1600,7 @@ class ANDData:
                                 same_name_different_cluster.append((s1, s2, 0))
                             else:
                                 different_name_different_cluster.append((s1, s2, 0))
+
         if all_pairs: # TODO: Need to update this for mode=inference
             if (
                 self.pair_sampling_balanced_homonym_synonym
@@ -1625,15 +1632,70 @@ class ANDData:
                 and not self.pair_sampling_balanced_classes
                 and not self.pair_sampling_balanced_homonym_synonym
             ):
-                # Take samples from each block weighted by their len of total samples
-                # sample_size = min(len(possible), sample_size)
-                # blockwise_pairs: Dict[str, List[Tuple[str, str, Union[int, float]]]] = {}
-                # for k in blockwise_sig_pairs.keys():
-                #     block_sample_size = int(sample_size * len(blockwise_sig_pairs[k])/len(possible))
-                #     samples = random_sampling(blockwise_sig_pairs[k], block_sample_size, self.random_seed)
-                #     if(len(samples)>0):
-                #         blockwise_pairs[k] = samples
-                return blockwise_sig_pairs, blockwise_cluster_ids
+                # Subsampling, while maintaining transitivity
+                sample_size = min(len(possible), sample_size)
+                pairs_ids = random_sampling(possible, sample_size, self.random_seed)
+                # Construct hashset to make queries faster
+                subsample_id_set = set()
+                for tuple in pairs_ids:
+                    id1, id2, _ = tuple
+                    subsample_id_set.add(id1)
+                    subsample_id_set.add(id2)
+
+                # if not os.path.exists("our_data_subsample.pkl"):
+                #     with open('our_data_subsample.pkl', 'wb') as f:
+                #         pickle.dump(subsample_id_set, f)
+
+                # Remove sig_pairs which are not subsampled
+                for block_id, signatures in blocks.items():
+                    sig_pairs = blockwise_sig_pairs[block_id]
+                    cluster_ids = blockwise_cluster_ids[block_id]
+                    n = len(signatures)
+                    block_len = len(sig_pairs)
+
+                    all_idxs = np.arange(0, n)
+                    sig_idxs_to_keep = []
+                    for i, s in enumerate(signatures):
+                        if (s in subsample_id_set):
+                            sig_idxs_to_keep.append(i)
+
+                    sig_idxs_to_keep = np.sort(sig_idxs_to_keep)
+                    if(sig_idxs_to_keep.size == 0):
+                        # delete the whole block
+                        del blockwise_sig_ids[block_id]
+                        del blockwise_sig_pairs[block_id]
+                        del blockwise_cluster_ids[block_id]
+                        continue
+                    elif(sig_idxs_to_keep.size== n):
+                        # continue no need to subsample
+                        continue
+                    else:
+                        sig_idxs_to_remove = np.delete(all_idxs, sig_idxs_to_keep)
+
+                    idxs_to_remove = []
+                    for midx in sig_idxs_to_remove:
+                        idxs_to_remove += self.get_indices_by_matrix_idx(midx, n)
+                    idxs_to_remove = np.sort(np.unique(idxs_to_remove))
+                    if (idxs_to_remove.size == 0):
+                        idxs_to_keep = np.arange(block_len)
+                    else:
+                        idxs_to_keep = np.delete(np.arange(block_len), idxs_to_remove)
+
+                    idxs_to_keep = np.array(idxs_to_keep, dtype=int)
+                    sig_idxs_to_keep = np.array(sig_idxs_to_keep, dtype=int)
+                    #print(type(idxs_to_keep), type(sig_idxs_to_keep), idxs_to_keep, sig_idxs_to_keep)
+                    _sig_pairs = [ele for idx, ele in enumerate(sig_pairs) if idx in idxs_to_keep]
+                    # Error in next line: 'tuple' object is not callable, but above line also works same
+                    #_sig_pairs = list(np.array([tuple(row) for row in sig_pairs], dtype=np.dtype('U10,U10,i'))[idxs_to_keep])
+                    _clusterIds = list(np.array(cluster_ids)[sig_idxs_to_keep])
+                    _signatures = list(np.array(signatures)[sig_idxs_to_keep])
+                    # Update the values in the dictionary
+                    blockwise_sig_pairs[block_id] = _sig_pairs
+                    blockwise_cluster_ids[block_id] = _clusterIds
+                    blockwise_sig_ids[block_id] = _signatures
+
+
+                return blockwise_sig_ids, blockwise_sig_pairs, blockwise_cluster_ids
 
             return pairs
 

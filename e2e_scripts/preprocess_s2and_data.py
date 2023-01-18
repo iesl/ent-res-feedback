@@ -13,6 +13,14 @@ import pickle
 import numpy as np
 from utils.parser import Parser
 
+from s2and.data import ANDData
+import logging
+from s2and.featurizer import FeaturizationInfo, featurize
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S',
+                    level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 def save_blockwise_featurized_data(dataset_name, random_seed):
     parent_dir = f"{DATA_HOME_DIR}/{dataset_name}"
@@ -23,22 +31,20 @@ def save_blockwise_featurized_data(dataset_name, random_seed):
         specter_embeddings=join(parent_dir, f"{dataset_name}_specter.pickle"),
         clusters=join(parent_dir, f"{dataset_name}_clusters.json"),
         block_type="s2",
-        train_pairs_size=100,
-        val_pairs_size=100,
-        test_pairs_size=100,
+        train_pairs_size=100000,
+        val_pairs_size=10000,
+        test_pairs_size=10000,
         name=dataset_name,
-        n_jobs=2,
+        n_jobs=16,
         random_seed=random_seed,
     )
-    # Uncomment the following line if you wish to preprocess the whole dataset
-    AND_dataset.process_whole_dataset()
 
     # Load the featurizer, which calculates pairwise similarity scores
     featurization_info = FeaturizationInfo()
     # the cache will make it faster to train multiple times - it stores the features on disk for you
     train_pkl, val_pkl, test_pkl = store_featurized_pickles(AND_dataset,
                                                             featurization_info,
-                                                            n_jobs=2,
+                                                            n_jobs=16,
                                                             use_cache=False,
                                                             random_seed=random_seed)
 
@@ -52,6 +58,51 @@ def read_blockwise_features(pkl):
 
     print("Total num of blocks:", len(blockwise_data.keys()))
     return blockwise_data
+
+def find_total_num_train_pairs(blockwise_data):
+    count = 0
+    for block_id in blockwise_data.keys():
+        count += len(blockwise_data[block_id][0])
+
+    print("Total num of signature pairs", count)
+
+# def verify_diff_with_s2and(dataset_name, random_seed):
+#     parent_dir = f"{DATA_HOME_DIR}/{dataset_name}"
+#     AND_dataset = ANDData(
+#         signatures=join(parent_dir, f"{dataset_name}_signatures.json"),
+#         papers=join(parent_dir, f"{dataset_name}_papers.json"),
+#         mode="train",
+#         specter_embeddings=join(parent_dir, f"{dataset_name}_specter.pickle"),
+#         clusters=join(parent_dir, f"{dataset_name}_clusters.json"),
+#         block_type="s2",
+#         train_pairs_size=100,
+#         val_pairs_size=100,
+#         test_pairs_size=100,
+#         # train_pairs_size=100000,
+#         # val_pairs_size=10000,
+#         # test_pairs_size=10000,
+#         name=dataset_name,
+#         n_jobs=2,
+#         random_seed=random_seed,
+#     )
+#
+#     # Load the featurizer, which calculates pairwise similarity scores
+#     featurization_info = FeaturizationInfo()
+#     # the cache will make it faster to train multiple times - it stores the features on disk for you
+#     train, val, test = featurize(AND_dataset, featurization_info, n_jobs=2, use_cache=False)
+#     X_train, y_train, _ = train
+#     X_val, y_val, _ = val
+#
+#     logger.info("Done loading and featurizing")
+#
+#     #Verify the 2 sets are equal
+#     with open("s2and_data_subsample.pkl", "rb") as _pkl_file:
+#         s2and_set = pickle.load(_pkl_file)
+#
+#     with open("our_data_subsample.pkl", "rb") as _pkl_file:
+#         our_set = pickle.load(_pkl_file)
+#
+#     print("VERIFICATION STATUS: ", s2and_set==our_set)
 
 
 if __name__=='__main__':
@@ -77,6 +128,8 @@ if __name__=='__main__':
         val_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset}/seed{seed}/val_features.pkl"
         test_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset}/seed{seed}/test_features.pkl"
         blockwise_features = read_blockwise_features(train_pkl)
+        find_total_num_train_pairs(blockwise_features)
+        #verify_diff_with_s2and(dataset, seed)
 
 
 
