@@ -565,7 +565,11 @@ if __name__ == '__main__':
 
         # Start sweep job
         wandb.agent(sweep_id,
-                    function=lambda: train(hyperparams=hyp_args),
+                    function=lambda: train(hyperparams=hyp_args,
+                                           verbose=not args['silent'],
+                                           save_model=args['save_model'],
+                                           skip_initial_eval=args['skip_initial_eval'],
+                                           pairwise_mode=args['pairwise_mode']),
                     count=args['wandb_max_runs'])
 
         logger.info("End of sweep")
