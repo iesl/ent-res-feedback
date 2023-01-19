@@ -70,7 +70,7 @@ class Parser(argparse.ArgumentParser):
         )
         parser.add_argument(
             "--wandb_sweep_id", type=str,
-            help="Wandb sweep id (optional -- if run is already started)",
+            help="Attach wandb agents to an existing wandb sweep (expects 'entity/project/runid' as input)",
         )
         parser.add_argument(
             "--wandb_sweep_method", type=str, default="bayes",
@@ -118,7 +118,7 @@ class Parser(argparse.ArgumentParser):
         )
         parser.add_argument(
             "--load_model_from_wandb_run", type=str,
-            help="Load model state_dict from a previous wandb run",
+            help="Load model state_dict from a previous wandb run (expects 'entity/project/runid' as input)",
         )
         parser.add_argument(
             "--load_model_from_fpath", type=str,
@@ -139,4 +139,13 @@ class Parser(argparse.ArgumentParser):
         parser.add_argument(
             "--pairwise_mode", action='store_true',
             help="Whether to use the pairwise MLP-only model or the e2e clustering model",
+        )
+        parser.add_argument(
+            "--pairwise_eval_clustering", type=str,
+            help="(only in --pairwise_mode) Whether to run clustering during --eval_only_split and final test eval. " +
+            "Accepts 'cc' for correlation clustering and 'hac' for agglomerative clustering.",
+        )
+        parser.add_argument(
+            "--load_gbdt_model", type=str,
+            help="(only in --pairwise_mode and --eval_only_split) Load a gbdt model to compute the pairwise weights."
         )
