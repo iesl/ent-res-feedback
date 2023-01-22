@@ -55,9 +55,10 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
         wandb.save('hyperparameters.json')
 
         # Seed everything
-        torch.manual_seed(hyp['run_random_seed'])
-        random.seed(hyp['run_random_seed'])
-        np.random.seed(hyp['run_random_seed'])
+        if hyp['run_random_seed'] is not None:
+            random.seed(hyp['run_random_seed'])
+            np.random.seed(hyp['run_random_seed'])
+            torch.manual_seed(hyp['run_random_seed'])
 
         weighted_loss = hyp['weighted_loss']
         batch_size = hyp['batch_size'] if pairwise_mode else 1  # Force clustering runs to operate on 1 block only
