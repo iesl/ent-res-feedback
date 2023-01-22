@@ -292,7 +292,8 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                             logger.info(f"Epoch {i + 1}: dev_{list(eval_metric_to_idx)[0]}={dev_scores[0]}, " +
                                         f"dev_{list(eval_metric_to_idx)[1]}={dev_scores[1]}")
                         wandb.log({f'dev_{list(eval_metric_to_idx)[0]}': dev_scores[0],
-                                   f'dev_{list(eval_metric_to_idx)[1]}': dev_scores[1]})
+                                   f'dev_{list(eval_metric_to_idx)[1]}': dev_scores[1],
+                                   f'train_epoch_loss': np.mean(running_loss)})
                         dev_opt_score = dev_scores[eval_metric_to_idx[dev_opt_metric]]
                         if dev_opt_score > best_dev_score:
                             if verbose:
