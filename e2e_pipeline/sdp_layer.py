@@ -11,6 +11,9 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class CvxpyException(Exception):
+    pass
+
 class SDPLayer(torch.nn.Module):
     def __init__(self, max_iters: int = 50000, eps: float = 1e-3):
         super().__init__()
@@ -38,12 +41,15 @@ class SDPLayer(torch.nn.Module):
         self.cvxpy_layer = CvxpyLayer(self.prob, parameters=[self.W], variables=[self.X])
 
         # Forward pass through the SDP cvxpylayer
-        pw_probs = self.cvxpy_layer(W_val, solver_args={
-            "solve_method": "SCS",
-            "verbose": verbose,
-            "max_iters": self.max_iters,
-            "eps": self.eps
-        })[0]
+        try:
+            pw_probs = self.cvxpy_layer(W_val, solver_args={
+                "solve_method": "SCS",
+                "verbose": verbose,
+                "max_iters": self.max_iters,
+                "eps": self.eps
+            })[0]
+        except:
+            raise CvxpyException()
 
         with torch.no_grad():
             objective_value = torch.sum(W_val * torch.triu(pw_probs, diagonal=1)).item()

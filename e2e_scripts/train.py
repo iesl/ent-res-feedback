@@ -15,6 +15,7 @@ from e2e_pipeline.cc_inference import CCInference
 from e2e_pipeline.hac_inference import HACInference
 from e2e_pipeline.model import EntResModel
 from e2e_pipeline.pairwise_model import PairwiseModel
+from e2e_pipeline.sdp_layer import CvxpyException
 from e2e_scripts.evaluate import evaluate, evaluate_pairwise
 from e2e_scripts.train_utils import DEFAULT_HYPERPARAMS, get_dataloaders, get_matrix_size_from_triu, \
     uncompress_target_tensor, count_parameters
@@ -234,6 +235,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
             for i in range(n_epochs):
                 wandb.log({'epoch': i + 1})
                 running_loss = []
+                n_exceptions = 0
                 for (idx, batch) in enumerate(tqdm(train_dataloader, desc=f"Training {i + 1}")):
                     if overfit_batch_idx > -1:
                         if idx < overfit_batch_idx:
@@ -267,7 +269,12 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                         gold_output = uncompress_target_tensor(target, device=device)
                         if verbose:
                             logger.info(f"Gold:\n{gold_output}")
-                        loss = loss_fn(output.view_as(gold_output), gold_output) / (2 * block_size)
+                        try:
+                            loss = loss_fn(output.view_as(gold_output), gold_output) / (2 * block_size)
+                        except CvxpyException:
+                            n_exceptions += 1
+                            logger.info(f'Caught CvxpyException {n_exceptions}: skipping batch')
+                            continue
                     else:
                         if verbose:
                             logger.info(f"Gold:\n{target}")
