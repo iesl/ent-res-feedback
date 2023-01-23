@@ -132,8 +132,8 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                     raise ValueError('Invalid argument passed to --pairwise_eval_clustering')
                 _, _, clustering_test_dataloader = get_dataloaders(hyp["dataset"], hyp["dataset_random_seed"],
                                                                    hyp["convert_nan"], hyp["nan_value"],
-                                                                   hyp["normalize_data"], hyp["subsample_sz"],
-                                                                   hyp["subsample_dev"], False, 1)
+                                                                   hyp["normalize_data"], hyp["subsample_sz_train"],
+                                                                   hyp["subsample_sz_dev"], False, 1)
         logger.info(f"Model loaded: {model}", )
 
         # Load stored model, if available
