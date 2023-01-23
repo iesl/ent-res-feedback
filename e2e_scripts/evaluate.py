@@ -22,6 +22,10 @@ def evaluate(model, dataloader, overfit_batch_idx=-1, clustering_fn=None, tqdm_l
     n_features = dataloader.dataset[0][0].shape[1]
 
     all_gold, all_pred = [], []
+    cc_obj_vals = {
+        'sdp': [],
+        'round': []
+    }
     max_pred_id = -1
     for (idx, batch) in enumerate(tqdm(dataloader, desc=f'Evaluating {tqdm_label}')):
         if overfit_batch_idx > -1:
@@ -41,11 +45,15 @@ def evaluate(model, dataloader, overfit_batch_idx=-1, clustering_fn=None, tqdm_l
             data = data.to(device)
             _ = model(data, block_size)
             pred_cluster_ids = (model.hac_cut_layer.cluster_labels + (max_pred_id + 1)).tolist()
+            cc_obj_vals['round'].append(model.hac_cut_layer.objective_value)
+            cc_obj_vals['sdp'].append(model.sdp_layer.objective_value)
         max_pred_id = max(pred_cluster_ids)
         all_pred += list(pred_cluster_ids)
     vmeasure = v_measure_score(all_gold, all_pred)
     b3_f1 = compute_b3_f1(all_gold, all_pred)[2]
-    return b3_f1, vmeasure
+    cc_obj_vals['round'] = np.mean(cc_obj_vals['round'])
+    cc_obj_vals['sdp'] = np.mean(cc_obj_vals['sdp'])
+    return b3_f1, vmeasure, cc_obj_vals
 
 
 def evaluate_pairwise(model, dataloader, overfit_batch_idx=-1, mode="macro", return_pred_only=False,

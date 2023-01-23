@@ -172,8 +172,16 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                     logger.info(
                         f"Eval: {eval_only_split}_{list(eval_metric_to_idx)[0]}={eval_scores[0]}, " +
                         f"{eval_only_split}_{list(eval_metric_to_idx)[1]}={eval_scores[1]}")
+                    if len(eval_scores) == 3:
+                        # CC objective values available
+                        logger.info(f"Eval: {eval_only_split}_obj_sdp={eval_scores[2]['sdp']}, " +
+                                    f"{eval_only_split}_obj_hac={eval_scores[2]['round']}")
                 wandb.log({'epoch': 0, f'{eval_only_split}_{list(eval_metric_to_idx)[0]}': eval_scores[0],
                            f'{eval_only_split}_{list(eval_metric_to_idx)[1]}': eval_scores[1]})
+                if len(eval_scores) == 3:
+                    # CC objective values available
+                    wandb.log({f'{eval_only_split}_obj_sdp': eval_scores[2]['sdp'],
+                               f'{eval_only_split}_obj_hac': eval_scores[2]['round']})
         else:
             # Training
             wandb.watch(model)
@@ -322,12 +330,20 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                     if verbose:
                         logger.info(f"Final: test_{list(eval_metric_to_idx)[0]}={test_scores[0]}, " +
                                     f"test_{list(eval_metric_to_idx)[1]}={test_scores[1]}")
+                        if len(test_scores) == 3:
+                            # CC objective values available
+                            logger.info(f"Final: test_obj_sdp={test_scores[2]['sdp']}, " +
+                                        f"test_obj_hac={test_scores[2]['round']}")
                     # Log final metrics
                     wandb.log({'best_dev_epoch': best_epoch + 1,
                                f'best_dev_{list(eval_metric_to_idx)[0]}': best_dev_scores[0],
                                f'best_dev_{list(eval_metric_to_idx)[1]}': best_dev_scores[1],
                                f'best_test_{list(eval_metric_to_idx)[0]}': test_scores[0],
                                f'best_test_{list(eval_metric_to_idx)[1]}': test_scores[1]})
+                    if len(test_scores) == 3:
+                        # CC objective values available
+                        wandb.log({'best_test_obj_sdp': test_scores[2]['sdp'],
+                                   'best_test_obj_hac': test_scores[2]['round']})
                     if pairwise_clustering_fn is not None:
                         clustering_scores = eval_fn(model, clustering_test_dataloader,
                                                     clustering_fn=pairwise_clustering_fn, tqdm_label='test clustering',
@@ -335,9 +351,17 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                         if verbose:
                             logger.info(f"Final: test_{list(clustering_metrics)[0]}={clustering_scores[0]}, " +
                                         f"test_{list(clustering_metrics)[1]}={clustering_scores[1]}")
+                            if len(clustering_scores) == 3:
+                                # CC objective values available
+                                logger.info(f"Final: test_obj_sdp={clustering_scores[2]['sdp']}, " +
+                                            f"test_obj_hac={clustering_scores[2]['round']}")
                         # Log final metrics
                         wandb.log({f'best_test_{list(clustering_metrics)[0]}': clustering_scores[0],
                                    f'best_test_{list(clustering_metrics)[1]}': clustering_scores[1]})
+                        if len(clustering_scores) == 3:
+                            # CC objective values available
+                            wandb.log({'best_test_obj_sdp': clustering_scores[2]['sdp'],
+                                       'best_test_obj_hac': clustering_scores[2]['round']})
 
 
         run.summary["z_model_parameters"] = count_parameters(model)

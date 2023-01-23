@@ -120,7 +120,7 @@ class HACCutLayer(torch.nn.Module):
         self.round_matrix = round_matrix
         self.cluster_labels = clustering[-1]
         self.parents = parents
-        self.objective_value = energy[max_node]
+        self.objective_value = energy[max_node].item()
         return self.round_matrix
 
     def forward(self, X, W, use_similarities=True):

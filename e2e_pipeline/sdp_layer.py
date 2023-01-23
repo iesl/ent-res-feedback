@@ -16,6 +16,7 @@ class SDPLayer(torch.nn.Module):
         super().__init__()
         self.max_iters = max_iters
         self.eps = eps
+        self.objective_value = None  # Stores the last run objective value
 
     def build_and_solve_sdp(self, W_val, N, verbose=False):
         # Initialize the cvxpy layer
@@ -45,12 +46,13 @@ class SDPLayer(torch.nn.Module):
         })[0]
 
         with torch.no_grad():
-            sdp_obj_value = torch.sum(W_val * torch.triu(pw_probs, diagonal=1)).item()
+            objective_value = torch.sum(W_val * torch.triu(pw_probs, diagonal=1)).item()
             if verbose:
-                logger.info(f'SDP objective = {sdp_obj_value}')
+                logger.info(f'SDP objective = {objective_value}')
 
-        return sdp_obj_value, pw_probs
+        return objective_value, pw_probs
 
     def forward(self, edge_weights_uncompressed, N, verbose=False):
-        _, pw_probs = self.build_and_solve_sdp(edge_weights_uncompressed, N, verbose)
+        objective_value, pw_probs = self.build_and_solve_sdp(edge_weights_uncompressed, N, verbose)
+        self.objective_value = objective_value
         return pw_probs
