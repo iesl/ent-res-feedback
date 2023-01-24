@@ -9,6 +9,7 @@ from sklearn.metrics import precision_recall_fscore_support
 import numpy as np
 import torch
 
+from e2e_pipeline.cc_inference import CCInference
 from e2e_pipeline.hac_inference import HACInference
 from e2e_scripts.train_utils import compute_b3_f1
 
@@ -72,6 +73,10 @@ def evaluate_pairwise(model, dataloader, overfit_batch_idx=-1, mode="macro", ret
             else:
                 clustering_fn.tune_threshold(model, val_dataloader, device)
         all_gold, all_pred = [], []
+        cc_obj_vals = {
+            'sdp': [],
+            'round': []
+        }
         max_pred_id = -1  # In each iteration, add to all blockwise predicted IDs to distinguish from previous blocks
         for (idx, batch) in enumerate(tqdm(dataloader, desc=f'Evaluating {tqdm_label}')):
             if overfit_batch_idx > -1:
@@ -92,9 +97,14 @@ def evaluate_pairwise(model, dataloader, overfit_batch_idx=-1, mode="macro", ret
                 pred_cluster_ids = clustering_fn(model(data), block_size, min_id=(max_pred_id + 1))
             max_pred_id = max(pred_cluster_ids)
             all_pred += list(pred_cluster_ids)
+            if clustering_fn.__class__ is CCInference:
+                cc_obj_vals['round'].append(clustering_fn.hac_cut_layer.objective_value)
+                cc_obj_vals['sdp'].append(clustering_fn.sdp_layer.objective_value)
         vmeasure = v_measure_score(all_gold, all_pred)
         b3_f1 = compute_b3_f1(all_gold, all_pred)[2]
-        return b3_f1, vmeasure
+        cc_obj_vals['round'] = np.mean(cc_obj_vals['round'])
+        cc_obj_vals['sdp'] = np.mean(cc_obj_vals['sdp'])
+        return (b3_f1, vmeasure, cc_obj_vals) if clustering_fn.__class__ is CCInference else (b3_f1, vmeasure)
 
     y_pred, targets = [], []
     for (idx, batch) in enumerate(tqdm(dataloader, desc=f'Evaluating {tqdm_label}')):

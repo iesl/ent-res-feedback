@@ -14,8 +14,11 @@ class HACCutLayer(torch.nn.Module):
     Executes straight-through estimator as the backward pass.
     """
     def get_rounded_solution(self, X, weights, _MAX_DIST=10, use_similarities=True, max_similarity=1, verbose=False):
-        # X is the NxN 0-1 output of the SDP layer
-        # W is an NxN upper-triangular (1-diagonal shifted) matrix of real values (expected + and - values)
+        """
+        X is a symmetric NxN matrix of fractional, decision values with a 1-diagonal (output from the SDP layer)
+        weights is an NxN upper-triangular (shift 1) matrix of edge weights
+        Return a symmetric NxN matrix of 0-1 decision values with a 1-diagonal
+        """
 
         # Initialization
         device = X.device
@@ -120,7 +123,8 @@ class HACCutLayer(torch.nn.Module):
         self.round_matrix = round_matrix
         self.cluster_labels = clustering[-1]
         self.parents = parents
-        self.objective_value = energy[max_node].item()
+        objective_matrix = weights * torch.triu(round_matrix, diagonal=1)
+        self.objective_value = (energy[max_node] - torch.sum(objective_matrix[objective_matrix < 0])).item()  # MA
         return self.round_matrix
 
     def forward(self, X, W, use_similarities=True):

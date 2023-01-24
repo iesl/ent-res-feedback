@@ -22,6 +22,10 @@ class SDPLayer(torch.nn.Module):
         self.objective_value = None  # Stores the last run objective value
 
     def build_and_solve_sdp(self, W_val, N, verbose=False):
+        """
+        W_val is an NxN upper-triangular (shift 1) matrix of edge weights
+        Returns a symmetric NxN matrix of fractional, decision values with a 1-diagonal
+        """
         # Initialize the cvxpy layer
         self.X = cp.Variable((N, N), PSD=True)
         self.W = cp.Parameter((N, N))
@@ -52,11 +56,13 @@ class SDPLayer(torch.nn.Module):
             raise CvxpyException()
 
         with torch.no_grad():
-            objective_value = torch.sum(W_val * torch.triu(pw_probs, diagonal=1)).item()
+            objective_matrix = W_val * torch.triu(pw_probs, diagonal=1)
+            objective_value_IC = torch.sum(objective_matrix).item()
+            objective_value_MA = objective_value_IC - torch.sum(objective_matrix[objective_matrix < 0]).item()
             if verbose:
-                logger.info(f'SDP objective = {objective_value}')
+                logger.info(f'SDP objective: intra-cluster={objective_value_IC}, max-agree={objective_value_MA}')
 
-        return objective_value, pw_probs
+        return objective_value_MA, pw_probs
 
     def forward(self, edge_weights_uncompressed, N, verbose=False):
         objective_value, pw_probs = self.build_and_solve_sdp(edge_weights_uncompressed, N, verbose)
