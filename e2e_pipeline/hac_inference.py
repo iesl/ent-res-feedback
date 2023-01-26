@@ -81,7 +81,7 @@ class HACInference:
         _cut_labels = _cut.labelisation_leaves(tree)
         return _cut_labels
 
-    def cluster(self, edge_weights, N, min_id=0, verbose=False, threshold=None, return_tree=False):
+    def cluster(self, edge_weights, N, min_id=0, threshold=None, return_tree=False, verbose=False):
         """
         edge_weights: N(N-1)/2 length array of weights from the upper-triangular (shift 1) pairwise weight matrix
         """
@@ -89,7 +89,7 @@ class HACInference:
         _data = []
         _g = hg.UndirectedGraph(N)
         r, c = np.triu_indices(N, k=1)
-        _dists = 1. - torch.sigmoid(edge_weights).cpu().numpy()
+        _dists = 1. - torch.sigmoid(edge_weights).cpu().numpy().reshape(N*(N-1)//2)
         _g.add_edges(r, c)
         _hac, _hac_alts = hg.binary_partition_tree_average_linkage(_g, _dists)
 

@@ -13,6 +13,7 @@ from s2and.data import S2BlocksDataset
 from s2and.eval import b3_precision_recall_fscore
 import torch
 import numpy as np
+import wandb
 
 from IPython import embed
 
@@ -26,6 +27,7 @@ DEFAULT_HYPERPARAMS = {
     "subsample_sz_dev": -1,
     # Run config
     "run_random_seed": 17,
+    "pairwise_mode": False,
     # Data config
     "convert_nan": False,
     "nan_value": -1,
@@ -50,14 +52,15 @@ DEFAULT_HYPERPARAMS = {
     "batch_size": 10000,  # For pairwise_mode only
     "lr": 1e-4,
     "n_epochs": 5,
+    "n_warmstart_epochs": 0,
     "weighted_loss": True,  # For pairwise_mode only; TODO: Think about implementing for e2e
     "use_lr_scheduler": True,
     "lr_scheduler": "plateau",  # "step"
-    "lr_factor": 0.7,
+    "lr_factor": 0.4,
     "lr_min": 1e-6,
-    "lr_scheduler_patience": 10,
-    "lr_step_size": 200,
-    "lr_gamma": 0.1,
+    "lr_scheduler_patience": 2,
+    "lr_step_size": 2,
+    "lr_gamma": 0.4,
     "weight_decay": 0.01,
     "dev_opt_metric": 'b3_f1',  # e2e: {'b3_f1', 'vmeasure'}; pairwise: {'auroc', 'f1'}
     "overfit_batch_idx": -1
@@ -129,3 +132,22 @@ def compute_b3_f1(true_cluster_ids, pred_cluster_ids):
         true_cluster_dict[true_cluster_ids[i]].append(i)
         pred_cluster_dict[pred_cluster_ids[i]].append(i)
     return b3_precision_recall_fscore(true_cluster_dict, pred_cluster_dict)
+
+def log_cc_objective_values(scores, split_name, log_prefix, verbose, logger, plot=False):
+    frac, round = np.array(scores[2]['sdp']), np.array(scores[2]['round'])
+    # Objective across blocks
+    total_frac_obj = np.sum(frac)
+    total_round_obj = np.sum(round)
+    # Mean approximation ratio across blocks
+    mean_approx_ratio = min(1., np.mean(round / frac))
+
+    if verbose:
+        logger.info(f"{log_prefix}: {split_name}_obj_frac={total_frac_obj}, " +
+                    f"{split_name}_obj_round={total_round_obj}, " +
+                    f"{split_name}_obj_ratio={mean_approx_ratio}")
+
+    wandb.log({f'{split_name}_obj_frac': total_frac_obj,
+               f'{split_name}_obj_round': total_round_obj,
+               f'{split_name}_obj_ratio': mean_approx_ratio})
+
+    # TODO: Implement plotting the approx. ratio v/s block sizes
