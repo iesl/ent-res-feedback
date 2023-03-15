@@ -495,7 +495,15 @@ class ANDData:
         self.preprocess_signatures(name_counts_loaded)
         logger.info("preprocessed signatures")
 
-
+    def force_signature_to_cluster_mapping(self):
+        if self.clusters is not None:
+            self.signature_to_cluster_id = {}
+            logger.info("making signature to cluster id")
+            for cluster_id, cluster_info in self.clusters.items():
+                for signature in cluster_info["signature_ids"]:
+                    self.signature_to_cluster_id[signature] = cluster_id
+            logger.info("made signature to cluster id")
+    
     def get_signature_objects(self, signature_ids: Dict[str, List[str]]) -> Dict[str, List[Signature]]:
         """
         Returns a dict of blockId with a list of it's Signature objects, useful for qualitative analysis

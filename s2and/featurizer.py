@@ -8,6 +8,9 @@ import numpy as np
 import functools
 import logging
 from collections import Counter
+from collections.abc import Iterable
+
+from sklearn import preprocessing
 
 from tqdm import tqdm
 
@@ -824,6 +827,114 @@ def featurize(
         )
         logger.info("featurized test")
         return train_features, val_features, test_features
+
+    
+def pointwise_featurize(
+    dataset: ANDData,
+    n_jobs: int = 1,
+    use_cache: bool = False,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    nan_value: float = np.nan,
+    delete_training_data: bool = False,
+    random_seed: int = 1,
+):
+    """
+    Featurizes the input dataset and stores as a unified pickle file. 
+
+    Parameters
+    ----------
+    dataset: ANDData
+        the dataset containing the relevant data
+    n_jobs: int
+        the number of cpus to use
+    use_cache: bool
+        whether or not to use write to/read from the features cache
+    chunk_size: int
+        the chunk size for multiprocessing
+    nan_value: float
+        the value to replace nans with
+    delete_training_data: bool
+        Whether to delete some suspicious training examples
+
+    Returns
+    -------
+    Returns the three items : 
+    1. Row indices of the sparse matrix containing the data
+    2. Column indices of the sparse matrix containing the data
+    3. The data to be filled in the given row and column combination.
+    """
+    # Do you think OrderedSet and OrderedDict should be used here? 
+    signature_feature_set = set()
+    signature_dict = {}
+    
+    # We dont need to iterate signature per block as we need to create for all the signatures irrespective of the block.
+
+    for signature_key, values in dataset.signatures.items():
+        per_signature_features = dataset.signatures[signature_key]._asdict()
+        signature_dict[signature_key] = []
+        for feature_key, value in per_signature_features.items():
+            index_key = None
+            if (value is None
+                    or (isinstance(value, Iterable) and len(value) == 0)):
+                continue
+            try:
+                if np.isnan(value):
+                    print('\n!!!! Found a NaN !!!!\n')
+                    exit()
+                    continue
+            except:
+                pass
+            
+            # Let us check the type of value for each signatures. 
+            
+            if isinstance(value, str) or isinstance(value, int):
+                index_key = (feature_key, value)
+                signature_feature_set.add(str(index_key))
+                signature_dict[signature_key].append(index_key)
+            elif isinstance(value, Counter):
+                for val in value.keys():
+                    index_key = (feature_key, val)
+                    signature_feature_set.add(str(index_key))
+                    signature_dict[signature_key].append(index_key)
+            elif isinstance(value, Iterable):
+                for val in value:
+                    index_key = (feature_key, val)
+                    signature_feature_set.add(str(index_key))
+                    signature_dict[signature_key].append(index_key)
+            else:
+                print('\n!!!! Found another type !!!!\n')
+                embed()
+                exit()
+    logger.info('Label encoding the values')
+    # Label encoding code --- 
+    
+    """"
+    {
+        "signature_id_one" : [(feat_key_1, val_1), (feat_key_2, val_2) ...],
+        "signature_id_two" : [(feat_key_1, val_1), (feat_key_3, val_3) ...]
+        
+    }
+    """
+    le_signature_feature_set = preprocessing.LabelEncoder()
+    le_signature_feature_set.fit(list(signature_feature_set))
+    
+    le_signature_dict = preprocessing.LabelEncoder()
+    le_signature_dict.fit(list(signature_dict.keys()))
+    
+    point_features_row, point_features_col, point_features_data = [], [], []
+    num_points = len(signature_dict.keys())
+    num_feats = len(signature_feature_set)
+    for key, values in signature_dict.items():
+        encoded_key_val = le_signature_dict.transform([key])[0]
+        val_strings = [str(val) for val in values]
+        encoded_values_val = le_signature_feature_set.transform(val_strings)
+        for val in encoded_values_val :
+            point_features_row.append(encoded_key_val)
+            point_features_col.append(val)
+            point_features_data.append(1)
+    
+    return point_features_row, point_features_col, point_features_data, num_feats, num_points
+            
 
 def store_featurized_pickles(
     dataset: ANDData,
