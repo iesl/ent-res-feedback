@@ -134,3 +134,15 @@ class Parser(argparse.ArgumentParser):
             help="(only in --pairwise_mode) Whether to run clustering during --eval_only_split and final test eval. " +
             "Accepts 'cc' for correlation clustering, 'hac' for agglomerative clustering, and 'both' to run both.",
         )
+        parser.add_argument(
+            "--debug", action="store_true",
+            help="Enable debugging mode, where train-eval flows do not quit on known errors in order to allow tracking",
+        )
+        parser.add_argument(
+            "--no_error_tracking", action="store_true",
+            help="Disable error logging for SDP forward and backward passes",
+        )
+        parser.add_argument(
+            "--local", action="store_true",
+            help="Run script with wandb disabled",
+        )
