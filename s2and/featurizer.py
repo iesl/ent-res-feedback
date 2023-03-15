@@ -864,7 +864,7 @@ def pointwise_featurize(
     3. The data to be filled in the given row and column combination.
     """
     # Do you think OrderedSet and OrderedDict should be used here? 
-    signature_feature_set = set()
+    signature_feature_set = set() # The feature is stored a str and not tuple to facilitate label encoding.
     signature_dict = {}
     
     # We dont need to iterate signature per block as we need to create for all the signatures irrespective of the block.
@@ -889,7 +889,7 @@ def pointwise_featurize(
             
             if isinstance(value, str) or isinstance(value, int):
                 index_key = (feature_key, value)
-                signature_feature_set.add(str(index_key))
+                signature_feature_set.add(str(index_key)) # Converting to str from tuple.
                 signature_dict[signature_key].append(index_key)
             elif isinstance(value, Counter):
                 for val in value.keys():

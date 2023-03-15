@@ -1,6 +1,6 @@
 """
 Run from command line:
-    python e2e_scripts/preprocess_s2and_data.py --data_home_dir="./data" --dataset_name="pubmed"
+    python e2e_scripts/preprocess_s2and_pointwise.py --data_home_dir="./data" --dataset_name="pubmed"
 """
 import sys
 
@@ -30,7 +30,7 @@ def save_pickled_pointwise_features(data_home_dir, dataset_name, random_seed):
     """
     processed_data = {}
     parent_dir = f"{data_home_dir}/{dataset_name}"
-    """
+    
     AND_dataset = ANDData(
         signatures=join(parent_dir, f"{dataset_name}_signatures.json"),
         papers=join(parent_dir, f"{dataset_name}_papers.json"),
@@ -44,15 +44,15 @@ def save_pickled_pointwise_features(data_home_dir, dataset_name, random_seed):
         n_jobs=16,
         random_seed=random_seed,
     )
-    """
+    
     #print("This is for pickling dataset....")
     #with open(f'preprocess_dataset_{dataset_name}.pkl', 'wb') as f:
     #    pickle.dump(AND_dataset, f)
     
-    print("getting pickled dataset...")
-    with open(f'preprocess_dataset_{dataset_name}.pkl', 'rb') as f:
-        AND_dataset = pickle.load(f)
-    print("Loaded pickle dataset...")
+    #print("getting pickled dataset...")
+    #with open(f'preprocess_dataset_{dataset_name}.pkl', 'rb') as f:
+    #    AND_dataset = pickle.load(f)
+    #print("Loaded pickle dataset...")
     
     
 
