@@ -1,6 +1,7 @@
 """
     Helper functions and constants for e2e_scripts/train.py
 """
+import copy
 import os
 import json
 from collections import defaultdict
@@ -8,6 +9,7 @@ from typing import Dict
 from typing import Tuple, Optional
 import math
 import pickle
+from time import time
 from torch.utils.data import DataLoader
 from s2and.consts import PREPROCESSED_DATA_DIR
 from s2and.data import S2BlocksDataset
@@ -160,11 +162,20 @@ def log_cc_objective_values(scores, split_name, log_prefix, verbose, logger, plo
     # TODO: Implement plotting the approx. ratio v/s block sizes
 
 
-def save_to_wandb_run(file, fname, fpath, logger):
+def save_to_wandb_run(file, fname, fpath, logger, error_logger=True):
+    if error_logger and os.path.exists(os.path.join(fpath, fname)):
+        with open(os.path.join(fpath, fname), 'r') as fh:
+            all_errors = json.load(fh)['errors']
+            all_ids = set([e['id'] for e in all_errors])
+            for new_error in file['errors']:
+                if new_error['id'] not in all_ids:
+                    all_errors.append(new_error)
+            file['errors'] = all_errors
     with open(os.path.join(fpath, fname), 'w') as fh:
         json.dump(file, fh)
     wandb.save(fname)
     logger.info(f"Saved {fname} to {os.path.join(fpath, fname)}")
+    return file
 
 
 class FrobeniusLoss:
@@ -182,3 +193,15 @@ class FrobeniusLoss:
         if self.weight is None:
             return torch.norm((target - input)) / normalization
         return torch.norm(self.weight * (target - input)) / normalization
+
+
+def copy_and_load_model(model, run_dir, device, store_only=False):
+    _model = copy.deepcopy(model)
+    _PATH = os.path.join(run_dir, f'_temp_state_dict_{int(time())}.pt')
+    torch.save(model.state_dict(), _PATH)
+    if store_only:
+        return _PATH
+    _STATE_DICT = torch.load(_PATH, device)
+    _model.load_state_dict(_STATE_DICT)
+    os.remove(_PATH)
+    return _model
