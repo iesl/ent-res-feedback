@@ -9,6 +9,7 @@ import functools
 import logging
 from collections import Counter
 from collections.abc import Iterable
+from IPython import embed
 
 from sklearn import preprocessing
 
@@ -828,15 +829,14 @@ def featurize(
         logger.info("featurized test")
         return train_features, val_features, test_features
 
+
+
     
 def pointwise_featurize(
     dataset: ANDData,
     n_jobs: int = 1,
     use_cache: bool = False,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
-    nan_value: float = np.nan,
-    delete_training_data: bool = False,
-    random_seed: int = 1,
 ):
     """
     Featurizes the input dataset and stores as a unified pickle file. 
@@ -851,10 +851,6 @@ def pointwise_featurize(
         whether or not to use write to/read from the features cache
     chunk_size: int
         the chunk size for multiprocessing
-    nan_value: float
-        the value to replace nans with
-    delete_training_data: bool
-        Whether to delete some suspicious training examples
 
     Returns
     -------
@@ -874,6 +870,20 @@ def pointwise_featurize(
         signature_dict[signature_key] = []
         for feature_key, value in per_signature_features.items():
             index_key = None
+            
+            features_to_ignore = [
+                    'author_info_name_counts',
+                    'author_info_position',
+                    'author_info_block',
+                    'author_info_given_block',
+                    'paper_id',
+                    'author_id',
+                    'sourced_author_source',
+                    'sourced_author_ids',
+            ]
+            if feature_key in features_to_ignore:
+                continue
+                
             if (value is None
                     or (isinstance(value, Iterable) and len(value) == 0)):
                 continue
@@ -888,18 +898,18 @@ def pointwise_featurize(
             # Let us check the type of value for each signatures. 
             
             if isinstance(value, str) or isinstance(value, int):
-                index_key = (feature_key, value)
-                signature_feature_set.add(str(index_key)) # Converting to str from tuple.
+                index_key = str((feature_key, value))
+                signature_feature_set.add(index_key) # Converting to str from tuple.
                 signature_dict[signature_key].append(index_key)
             elif isinstance(value, Counter):
                 for val in value.keys():
-                    index_key = (feature_key, val)
-                    signature_feature_set.add(str(index_key))
+                    index_key = str((feature_key, val))
+                    signature_feature_set.add(index_key)
                     signature_dict[signature_key].append(index_key)
             elif isinstance(value, Iterable):
                 for val in value:
-                    index_key = (feature_key, val)
-                    signature_feature_set.add(str(index_key))
+                    index_key = str((feature_key, val))
+                    signature_feature_set.add(index_key)
                     signature_dict[signature_key].append(index_key)
             else:
                 print('\n!!!! Found another type !!!!\n')
@@ -918,21 +928,17 @@ def pointwise_featurize(
     le_signature_feature_set = preprocessing.LabelEncoder()
     le_signature_feature_set.fit(list(signature_feature_set))
     
-    le_signature_dict = preprocessing.LabelEncoder()
-    le_signature_dict.fit(list(signature_dict.keys()))
-    
     point_features_row, point_features_col, point_features_data = [], [], []
     num_points = len(signature_dict.keys())
-    num_feats = len(signature_feature_set)
-    for key, values in signature_dict.items():
-        encoded_key_val = le_signature_dict.transform([key])[0]
-        val_strings = [str(val) for val in values]
-        encoded_values_val = le_signature_feature_set.transform(val_strings)
-        for val in encoded_values_val :
-            point_features_row.append(encoded_key_val)
-            point_features_col.append(val)
-            point_features_data.append(1)
+    num_feats = len(signature_feature_set)   
     
+    for index, (_, values) in tqdm(enumerate(signature_dict.items()), desc="Converting to spare matrix"):
+        encoded_signature_features = le_signature_feature_set.transform(values)
+        for feature_label in encoded_signature_features :
+            point_features_row.append(index)
+            point_features_col.append(feature_label)
+            point_features_data.append(1)
+                          
     return point_features_row, point_features_col, point_features_data, num_feats, num_points
             
 

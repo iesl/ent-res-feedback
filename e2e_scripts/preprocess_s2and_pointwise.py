@@ -19,12 +19,13 @@ from utils.parser import Parser
 from s2and.data import ANDData
 import logging
 from s2and.featurizer import FeaturizationInfo, featurize
+from IPython import embed
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def save_pickled_pointwise_features(data_home_dir, dataset_name, random_seed):
+def save_pickled_pointwise_features(data_home_dir, dataset_name):
     """
     Fetch pointwise feature for dataset and store in a pickle.
     """
@@ -45,27 +46,25 @@ def save_pickled_pointwise_features(data_home_dir, dataset_name, random_seed):
         random_seed=random_seed,
     )
     
-    #print("This is for pickling dataset....")
-    #with open(f'preprocess_dataset_{dataset_name}.pkl', 'wb') as f:
-    #    pickle.dump(AND_dataset, f)
+    # print("Storing pickled dataset....")
+    # with open(f'preprocess_dataset_{dataset_name}.pkl', 'wb') as f:
+    #     pickle.dump(AND_dataset, f)
     
-    #print("getting pickled dataset...")
-    #with open(f'preprocess_dataset_{dataset_name}.pkl', 'rb') as f:
-    #    AND_dataset = pickle.load(f)
-    #print("Loaded pickle dataset...")
+    # print("Loading pickled dataset...")
+    # with open(f'preprocess_dataset_{dataset_name}.pkl', 'rb') as f:
+    #     AND_dataset = pickle.load(f)
+    # print("Loaded pickle dataset...")
     
     
 
     point_features_row, point_features_col,  point_features_data, num_feats, num_points = pointwise_featurize(AND_dataset,
                                                                                                               n_jobs=16,
-                                                                                                              use_cache=False,
-                                                                                                        random_seed=random_seed)
+                                                                                                            use_cache=False)
     logger.info('converting feature indices to csr_matrix')
     point_features = coo_matrix(
             (point_features_data, (point_features_row, point_features_col)),
             shape=(num_points, num_feats)
     ).tocsr()
-    
     print("Matrix creation done.")
     processed_data['mention_level_features'] = point_features
     
@@ -88,7 +87,6 @@ if __name__=='__main__':
     data_home_dir = params["data_home_dir"]
     dataset = params["dataset_name"]
 
-    seed = 1211 # Dummy not needed, can be totally removed.
-    print("Preprocessing started for seed value", seed)
-    save_pickled_pointwise_features(data_home_dir, dataset, seed)
+    print("Preprocessing started")
+    save_pickled_pointwise_features(data_home_dir, dataset)
     print("Matrix")
