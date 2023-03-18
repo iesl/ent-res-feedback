@@ -1,7 +1,6 @@
 import glob
 import json
 import os
-import sys
 import time
 import logging
 import random
@@ -10,8 +9,8 @@ import copy
 import wandb
 import torch
 import numpy as np
-
 from tqdm import tqdm
+from torch.multiprocessing import set_start_method, Manager
 
 from e2e_pipeline.cc_inference import CCInference
 from e2e_pipeline.hac_inference import HACInference
@@ -21,117 +20,19 @@ from e2e_pipeline.sdp_layer import CvxpyException
 from e2e_scripts.evaluate import evaluate, evaluate_pairwise
 from e2e_scripts.train_utils import DEFAULT_HYPERPARAMS, get_dataloaders, get_matrix_size_from_triu, \
     uncompress_target_tensor, count_parameters, log_cc_objective_values, save_to_wandb_run, FrobeniusLoss, \
-    copy_and_load_model
+    get_feature_count, _check_process, fork_eval, init_eval, dev_eval
 from utils.parser import Parser
 
-from torch.multiprocessing import Process, set_start_method, Manager
+from IPython import embed
 
 try:
     set_start_method('spawn', force=True)
 except RuntimeError:
     pass
 
-from IPython import embed
-
-
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def _check_process(_proc, _return_dict, logger, run, overfit_batch_idx, use_lr_scheduler, hyp,
-                  scheduler, eval_metric_to_idx, dev_opt_metric, i, best_epoch, best_dev_score,
-                  best_dev_scores, best_dev_state_dict, sync=False):
-    if _proc is not None:
-        if _return_dict['_state'] == 'done' or (sync and _return_dict['_state'] == 'start'):
-            _proc.join()
-            _return_dict['_state'] = 'finish'
-            if _return_dict['_method'] == 'init_eval':
-                logger.info(_return_dict['local'])
-                run.log(_return_dict['wandb'])
-            elif _return_dict['_method'] == 'dev_eval':
-                logger.info(_return_dict['local'])
-                run.log(_return_dict['wandb'])
-                if overfit_batch_idx > -1:
-                    if use_lr_scheduler:
-                        if hyp['lr_scheduler'] == 'plateau':
-                            scheduler.step(_return_dict['train_scores'][eval_metric_to_idx[dev_opt_metric]])
-                        elif hyp['lr_scheduler'] == 'step':
-                            scheduler.step()
-                else:
-                    dev_scores = _return_dict['dev_scores']
-                    dev_opt_score = dev_scores[eval_metric_to_idx[dev_opt_metric]]
-                    if dev_opt_score > best_dev_score:
-                        logger.info(f"New best dev {dev_opt_metric} score @ epoch{i+1}: {dev_opt_score}")
-                        best_epoch = i
-                        best_dev_score = dev_opt_score
-                        best_dev_scores = dev_scores
-                        best_dev_state_dict = torch.load(_return_dict['state_dict_path'], device)
-                    if use_lr_scheduler:
-                        if hyp['lr_scheduler'] == 'plateau':
-                            scheduler.step(dev_scores[eval_metric_to_idx[dev_opt_metric]])
-                        elif hyp['lr_scheduler'] == 'step':
-                            scheduler.step()
-    return best_epoch, best_dev_score, best_dev_scores, best_dev_state_dict
-
-
-def init_eval(model_class, model_args, state_dict_path, overfit_batch_idx, eval_fn, train_dataloader, device, verbose,
-              debug, _errors, eval_metric_to_idx, val_dataloader, return_dict):
-    return_dict['_state'] = 'start'
-    return_dict['_method'] = 'init_eval'
-    model = model_class(*model_args)
-    model.load_state_dict(torch.load(state_dict_path))
-    model.to(device)
-    with torch.no_grad():
-        model.eval()
-        if overfit_batch_idx > -1:
-            train_scores = eval_fn(model, train_dataloader, overfit_batch_idx=overfit_batch_idx,
-                                   tqdm_label='train', device=device, verbose=verbose, debug=debug,
-                                   _errors=_errors, tqdm_position=0)
-            return_dict['local'] = f"Initial: train_{list(eval_metric_to_idx)[0]}={train_scores[0]}, " + \
-                                   f"train_{list(eval_metric_to_idx)[1]}={train_scores[1]}"
-            return_dict['wandb'] = {'epoch': 0, f'train_{list(eval_metric_to_idx)[0]}': train_scores[0],
-                                    f'train_{list(eval_metric_to_idx)[1]}': train_scores[1]}
-        else:
-            dev_scores = eval_fn(model, val_dataloader, tqdm_label='dev 0', device=device, verbose=verbose,
-                                 debug=debug, _errors=_errors, tqdm_position=0)
-            return_dict['local'] = f"Initial: dev_{list(eval_metric_to_idx)[0]}={dev_scores[0]}, " + \
-                                   f"dev_{list(eval_metric_to_idx)[1]}={dev_scores[1]}"
-            return_dict['wandb'] = {'epoch': 0, f'dev_{list(eval_metric_to_idx)[0]}': dev_scores[0],
-                                    f'dev_{list(eval_metric_to_idx)[1]}': dev_scores[1]}
-    del model
-    return_dict['_state'] = 'done'
-
-
-def dev_eval(model_class, model_args, state_dict_path, overfit_batch_idx, eval_fn, train_dataloader, device, verbose,
-             debug, _errors, eval_metric_to_idx, val_dataloader, return_dict, i, run_dir):
-    return_dict['_state'] = 'start'
-    return_dict['_method'] = 'dev_eval'
-    return_dict['state_dict_path'] = state_dict_path
-    model = model_class(*model_args)
-    model.load_state_dict(torch.load(state_dict_path))
-    model.to(device)
-    with torch.no_grad():
-        model.eval()
-        if overfit_batch_idx > -1:
-            train_scores = eval_fn(model, train_dataloader, overfit_batch_idx=overfit_batch_idx,
-                                   tqdm_label='train', device=device, verbose=verbose, debug=debug,
-                                   _errors=_errors)
-            return_dict['local'] = f"Epoch {i + 1}: train_{list(eval_metric_to_idx)[0]}={train_scores[0]}, " + \
-                                   f"train_{list(eval_metric_to_idx)[1]}={train_scores[1]}"
-            return_dict['wandb'] = {f'train_{list(eval_metric_to_idx)[0]}': train_scores[0],
-                                    f'train_{list(eval_metric_to_idx)[1]}': train_scores[1]}
-            return_dict['train_scores'] = train_scores
-        else:
-            dev_scores = eval_fn(model, val_dataloader, tqdm_label=f'dev {i+1}', device=device, verbose=verbose,
-                                 debug=debug, _errors=_errors)
-            return_dict['local'] = f"Epoch {i + 1}: dev_{list(eval_metric_to_idx)[0]}={dev_scores[0]}, " + \
-                                   f"dev_{list(eval_metric_to_idx)[1]}={dev_scores[1]}"
-            return_dict['wandb'] = {f'dev_{list(eval_metric_to_idx)[0]}': dev_scores[0],
-                                    f'dev_{list(eval_metric_to_idx)[1]}': dev_scores[1]}
-            return_dict['dev_scores'] = dev_scores
-    del model
-    return_dict['_state'] = 'done'
 
 
 def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, group=None,
@@ -206,14 +107,20 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
         eval_metric_to_idx = clustering_metrics if not pairwise_mode else pairwise_metrics
         dev_opt_metric = hyp['dev_opt_metric'] if hyp['dev_opt_metric'] in eval_metric_to_idx \
             else list(eval_metric_to_idx)[0]
+        training_mode = not eval_all and eval_only_split is None
 
         # Get data loaders (optionally with imputation, normalization)
-        train_dataloader, val_dataloader, test_dataloader = get_dataloaders(hyp["dataset"], hyp["dataset_random_seed"],
-                                                                            hyp["convert_nan"], hyp["nan_value"],
-                                                                            hyp["normalize_data"], hyp["subsample_sz_train"],
-                                                                            hyp["subsample_sz_dev"], pairwise_mode,
-                                                                            batch_size)
-        n_features = train_dataloader.dataset[0][0].shape[1]
+        if training_mode:
+            train_dataloader, val_dataloader, test_dataloader = get_dataloaders(hyp["dataset"],
+                                                                                hyp["dataset_random_seed"],
+                                                                                hyp["convert_nan"], hyp["nan_value"],
+                                                                                hyp["normalize_data"],
+                                                                                hyp["subsample_sz_train"],
+                                                                                hyp["subsample_sz_dev"], pairwise_mode,
+                                                                                batch_size)
+            n_features = train_dataloader.dataset[0][0].shape[1]
+        else:
+            n_features = get_feature_count(hyp["dataset"], hyp["dataset_random_seed"])
 
         # Create model with hyperparams
         if not pairwise_mode:
@@ -222,53 +129,44 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                          negative_slope, hidden_config, sdp_max_iters, sdp_eps, sdp_scale,
                          use_rounded_loss, (e2e_loss == "bce"), use_sdp)
             model = EntResModel(*model_args)
-            # Define loss
-            if e2e_loss not in ["frob", "bce"]:
-                raise ValueError("Invalid value for e2e_loss")
-            loss_fn_e2e = FrobeniusLoss() if e2e_loss == 'frob' else torch.nn.BCELoss()
-
-            pos_weight = None
-            if weighted_loss:
-                if overfit_batch_idx > -1:
-                    n_pos = train_dataloader.dataset[overfit_batch_idx][1].sum()
-                    pos_weight = (len(train_dataloader.dataset[overfit_batch_idx][1]) - n_pos) / n_pos
-                else:
-                    _n_pos, _n_total = 0., 0.
-                    for _i in range(len(train_dataloader.dataset)):
-                        _n_pos += train_dataloader.dataset[_i][1].sum()
-                        _n_total += len(train_dataloader.dataset[_i][1])
-                        pos_weight = (_n_total - _n_pos) / _n_pos
             # Define eval
             eval_fn = evaluate
             pairwise_clustering_fns = [None]  # Unused when pairwise_mode is False
-            if n_warmstart_epochs > 0:
-                train_dataloader_pairwise, _, _ = get_dataloaders(hyp["dataset"],
-                                                                  hyp["dataset_random_seed"],
-                                                                  hyp["convert_nan"],
-                                                                  hyp["nan_value"],
-                                                                  hyp["normalize_data"],
-                                                                  hyp["subsample_sz_train"],
-                                                                  hyp["subsample_sz_dev"],
-                                                                  True, hyp['batch_size'])
+
+            if training_mode:  # => model will be used for training
                 # Define loss
-                loss_fn_pairwise = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight))
+                if e2e_loss not in ["frob", "bce"]:
+                    raise ValueError("Invalid value for e2e_loss")
+                loss_fn_e2e = FrobeniusLoss() if e2e_loss == 'frob' else torch.nn.BCELoss()
+
+                pos_weight = None
+                if weighted_loss:
+                    if overfit_batch_idx > -1:
+                        n_pos = train_dataloader.dataset[overfit_batch_idx][1].sum()
+                        pos_weight = (len(train_dataloader.dataset[overfit_batch_idx][1]) - n_pos) / n_pos
+                    else:
+                        _n_pos, _n_total = 0., 0.
+                        for _i in range(len(train_dataloader.dataset)):
+                            _n_pos += train_dataloader.dataset[_i][1].sum()
+                            _n_total += len(train_dataloader.dataset[_i][1])
+                        pos_weight = (_n_total - _n_pos) / _n_pos if _n_pos > 0 else 1.
+                if n_warmstart_epochs > 0:
+                    train_dataloader_pairwise = get_dataloaders(hyp["dataset"],
+                                                                hyp["dataset_random_seed"],
+                                                                hyp["convert_nan"],
+                                                                hyp["nan_value"],
+                                                                hyp["normalize_data"],
+                                                                hyp["subsample_sz_train"],
+                                                                hyp["subsample_sz_dev"],
+                                                                pairwise_mode=True, batch_size=hyp['batch_size'],
+                                                                split='train')
+                    # Define loss
+                    loss_fn_pairwise = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight))
         else:
             model_args = (n_features, neumiss_depth, dropout_p, dropout_only_once, add_neumiss,
-                               neumiss_deq, hidden_dim, n_hidden_layers, add_batchnorm, activation,
-                               negative_slope, hidden_config)
+                          neumiss_deq, hidden_dim, n_hidden_layers, add_batchnorm, activation,
+                          negative_slope, hidden_config)
             model = PairwiseModel(*model_args)
-            # Define loss
-            pos_weight = None
-            if weighted_loss:
-                if overfit_batch_idx > -1:
-                    n_pos = \
-                        train_dataloader.dataset[overfit_batch_idx * batch_size:(overfit_batch_idx + 1) * batch_size][
-                            1].sum()
-                    pos_weight = torch.tensor((batch_size - n_pos) / n_pos)
-                else:
-                    n_pos = train_dataloader.dataset[:][1].sum()
-                    pos_weight = torch.tensor((len(train_dataloader.dataset) - n_pos) / n_pos)
-            loss_fn_pairwise = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
             # Define eval
             eval_fn = evaluate_pairwise
             pairwise_clustering_fns = [None]
@@ -287,14 +185,28 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                     pairwise_clustering_fn_labels = ['cc', 'hac', 'cc-fixed']
                 else:
                     raise ValueError('Invalid argument passed to --pairwise_eval_clustering')
-                _, val_dataloader_e2e, test_dataloader_e2e = get_dataloaders(hyp["dataset"],
-                                                                             hyp["dataset_random_seed"],
-                                                                             hyp["convert_nan"],
-                                                                             hyp["nan_value"],
-                                                                             hyp["normalize_data"],
-                                                                             hyp["subsample_sz_train"],
-                                                                             hyp["subsample_sz_dev"],
-                                                                             pairwise_mode=False, batch_size=1)
+                val_dataloader_e2e, test_dataloader_e2e = get_dataloaders(hyp["dataset"],
+                                                                          hyp["dataset_random_seed"],
+                                                                          hyp["convert_nan"],
+                                                                          hyp["nan_value"],
+                                                                          hyp["normalize_data"],
+                                                                          hyp["subsample_sz_train"],
+                                                                          hyp["subsample_sz_dev"],
+                                                                          pairwise_mode=False, batch_size=1,
+                                                                          split=['dev', 'test'])
+            if training_mode:  # => model will be used for training
+                # Define loss
+                pos_weight = None
+                if weighted_loss:
+                    if overfit_batch_idx > -1:
+                        n_pos = \
+                            train_dataloader.dataset[overfit_batch_idx * batch_size:(overfit_batch_idx + 1) * batch_size][
+                                1].sum()
+                        pos_weight = torch.tensor((batch_size - n_pos) / n_pos if n_pos > 0 else 1.)
+                    else:
+                        n_pos = train_dataloader.dataset[:][1].sum()
+                        pos_weight = torch.tensor((len(train_dataloader.dataset) - n_pos) / n_pos if n_pos > 0 else 1.)
+                loss_fn_pairwise = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         logger.info(f"Model loaded: {model}", )
 
         # Load stored model, if available
@@ -323,14 +235,15 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                                    'cc-nosdp', 'cc-nosdp-fixed']
             cc_inference_sdp.eval()
             cc_inference_nosdp.eval()
-            _, val_dataloader_e2e, test_dataloader_e2e = get_dataloaders(hyp["dataset"],
-                                                                         hyp["dataset_random_seed"],
-                                                                         hyp["convert_nan"],
-                                                                         hyp["nan_value"],
-                                                                         hyp["normalize_data"],
-                                                                         hyp["subsample_sz_train"],
-                                                                         hyp["subsample_sz_dev"],
-                                                                         pairwise_mode=False, batch_size=1)
+            val_dataloader_e2e, test_dataloader_e2e = get_dataloaders(hyp["dataset"],
+                                                                      hyp["dataset_random_seed"],
+                                                                      hyp["convert_nan"],
+                                                                      hyp["nan_value"],
+                                                                      hyp["normalize_data"],
+                                                                      hyp["subsample_sz_train"],
+                                                                      hyp["subsample_sz_dev"],
+                                                                      pairwise_mode=False, batch_size=1,
+                                                                      split=['dev', 'test'])
             start_time = time.time()
             with torch.no_grad():
                 model.eval()
@@ -342,7 +255,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                                                           clustering_threshold=clustering_threshold if i % 2 == 0 else None,
                                                           val_dataloader=val_dataloader_e2e,
                                                           tqdm_label='test clustering', device=device, verbose=verbose,
-                                                          debug=debug, _errors=_errors)
+                                                          debug=debug, _errors=_errors, model_args=model_args)
                     if inference_fn.__class__ is HACInference:
                         clustering_threshold = inference_fn.cut_threshold
                     logger.info(
@@ -360,18 +273,16 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
             end_time = time.time()
         elif eval_only_split is not None:
             # Run inference on the specified split and exit
-            dataloaders = {
-                'train': train_dataloader,
-                'dev': val_dataloader,
-                'test': test_dataloader
-            }
             start_time = time.time()
             with torch.no_grad():
                 model.eval()
-
-                eval_dataloader = dataloaders[eval_only_split]
+                eval_dataloader = get_dataloaders(hyp["dataset"], hyp["dataset_random_seed"],
+                                                  hyp["convert_nan"], hyp["nan_value"],
+                                                  hyp["normalize_data"], hyp["subsample_sz_train"],
+                                                  hyp["subsample_sz_dev"], pairwise_mode,
+                                                  batch_size, split=eval_only_split)
                 eval_scores = eval_fn(model, eval_dataloader, tqdm_label=eval_only_split, device=device, verbose=verbose,
-                                      debug=debug, _errors=_errors)
+                                      debug=debug, _errors=_errors, model_args=model_args)
                 logger.info(f"Eval: {eval_only_split}_{list(eval_metric_to_idx)[0]}={eval_scores[0]}, " +
                             f"{eval_only_split}_{list(eval_metric_to_idx)[1]}={eval_scores[1]}")
                 # Log eval metrics
@@ -380,7 +291,6 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                 if len(eval_scores) == 3:
                     log_cc_objective_values(scores=eval_scores, split_name=eval_only_split, log_prefix='Eval',
                                             verbose=verbose, logger=logger)
-
                 # For pairwise-mode:
                 if pairwise_clustering_fns[0] is not None:
                     clustering_threshold = None
@@ -390,7 +300,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                                                     clustering_threshold=clustering_threshold,
                                                     val_dataloader=val_dataloader_e2e,
                                                     tqdm_label='test clustering', device=device, verbose=verbose,
-                                                    debug=debug, _errors=_errors)
+                                                    debug=debug, _errors=_errors, model_args=model_args)
                         if pairwise_clustering_fn.__class__ is HACInference:
                             clustering_threshold = pairwise_clustering_fn.cut_threshold
                         logger.info(
@@ -430,15 +340,14 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
 
             if not skip_initial_eval:
                 # Get initial model performance on dev (or 'train' for overfitting runs)
-                _state_dict_path = copy_and_load_model(model, run.dir, device, store_only=True)
-                _proc = Process(target=init_eval,
-                                kwargs=dict(model_class=model.__class__, model_args=model_args,
-                                            state_dict_path=_state_dict_path,
-                                            overfit_batch_idx=overfit_batch_idx, eval_fn=eval_fn,
-                                            train_dataloader=train_dataloader, device=device, verbose=verbose,
-                                            debug=debug, _errors=_errors, eval_metric_to_idx=eval_metric_to_idx,
-                                            val_dataloader=val_dataloader, return_dict=_return_dict))
-                _proc.start()
+                _proc = fork_eval(target=init_eval, args=dict(model_args=model_args,
+                                                              overfit_batch_idx=overfit_batch_idx, eval_fn=eval_fn,
+                                                              train_dataloader=train_dataloader, device=device,
+                                                              verbose=verbose,
+                                                              debug=debug, _errors=_errors,
+                                                              eval_metric_to_idx=eval_metric_to_idx,
+                                                              val_dataloader=val_dataloader, return_dict=_return_dict),
+                                  model=model, run_dir=run.dir, device=device, logger=logger)
             if not pairwise_mode and grad_acc > 1:
                 grad_acc_steps = []
                 _seen_pw = 0
@@ -473,9 +382,9 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                 grad_acc_idx = 0
                 optimizer.zero_grad()
 
-                for (idx, batch) in enumerate(tqdm(_train_dataloader,
-                                                   desc=f"{'Warm-starting' if warmstart_mode else 'Training'} {i + 1}",
-                                                   position=1)):
+                pbar = tqdm(_train_dataloader, desc=f"{'Warm-starting' if warmstart_mode else 'Training'} {i + 1}",
+                            position=1)
+                for (idx, batch) in enumerate(pbar):
                     best_epoch, best_dev_score, best_dev_scores, best_dev_state_dict = _check_process(_proc,
                                                                                                       _return_dict,
                                                                                                       logger, run,
@@ -506,6 +415,8 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                         # Block contains only one signature pair; batchnorm throws error
                         continue
                     block_size = get_matrix_size_from_triu(data)
+                    pbar.set_description(f"{'Warm-starting' if warmstart_mode else 'Training'} {i + 1} " + \
+                                         f"(sz={len(data) if (pairwise_mode or warmstart_mode) else block_size})")
                     target = target.flatten().float()
                     if verbose:
                         logger.info(f"Batch shape: {data.shape}")
@@ -611,29 +522,29 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                 wandb.log({f'train_epoch_loss': np.mean(running_loss)})
 
                 # Get model performance on dev (or 'train' for overfitting runs)
-                _state_dict_path = copy_and_load_model(model, run.dir, device, store_only=True)
-                _proc = Process(target=dev_eval,
-                                kwargs=dict(model_class=model.__class__, model_args=model_args,
-                                            state_dict_path=_state_dict_path, overfit_batch_idx=overfit_batch_idx,
-                                            eval_fn=eval_fn, train_dataloader=train_dataloader, device=device,
+                _proc = fork_eval(target=dev_eval,
+                                  args=dict(model_args=model_args,
+                                            overfit_batch_idx=overfit_batch_idx, eval_fn=eval_fn,
+                                            train_dataloader=train_dataloader, device=device,
                                             verbose=verbose, debug=debug, _errors=_errors,
                                             eval_metric_to_idx=eval_metric_to_idx, val_dataloader=val_dataloader,
-                                            return_dict=_return_dict, i=i, run_dir=run.dir))
-                _proc.start()
+                                            return_dict=_return_dict, i=i),
+                                  model=model, run_dir=run.dir, device=device, logger=logger,
+                                  sync=(idx == len(_train_dataloader.dataset) - 1))
             end_time = time.time()
 
             best_epoch, best_dev_score, best_dev_scores, best_dev_state_dict = _check_process(_proc, _return_dict,
-                                                                                             logger, run,
-                                                                                             overfit_batch_idx,
-                                                                                             use_lr_scheduler,
-                                                                                             hyp, scheduler,
-                                                                                             eval_metric_to_idx,
-                                                                                             dev_opt_metric, i,
-                                                                                             best_epoch,
-                                                                                             best_dev_score,
-                                                                                             best_dev_scores,
-                                                                                             best_dev_state_dict,
-                                                                                             sync=True)
+                                                                                              logger, run,
+                                                                                              overfit_batch_idx,
+                                                                                              use_lr_scheduler,
+                                                                                              hyp, scheduler,
+                                                                                              eval_metric_to_idx,
+                                                                                              dev_opt_metric, i,
+                                                                                              best_epoch,
+                                                                                              best_dev_score,
+                                                                                              best_dev_scores,
+                                                                                              best_dev_state_dict,
+                                                                                              sync=True)
             # Save model
             if save_model:
                 torch.save(best_dev_state_dict, os.path.join(run.dir, 'model_state_dict_best.pt'))
@@ -646,7 +557,7 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                 with torch.no_grad():
                     model.eval()
                     test_scores = eval_fn(model, test_dataloader, tqdm_label='test', device=device, verbose=verbose,
-                                          debug=debug, _errors=_errors, tqdm_position=2)
+                                          debug=debug, _errors=_errors, tqdm_position=2, model_args=model_args)
                     logger.info(f"Final: test_{list(eval_metric_to_idx)[0]}={test_scores[0]}, " +
                                 f"test_{list(eval_metric_to_idx)[1]}={test_scores[1]}")
                     # Log final metrics
@@ -667,7 +578,8 @@ def train(hyperparams={}, verbose=False, project=None, entity=None, tags=None, g
                                                         clustering_threshold=clustering_threshold,
                                                         val_dataloader=val_dataloader_e2e,
                                                         tqdm_label='test clustering', device=device, verbose=verbose,
-                                                        debug=debug, _errors=_errors, tqdm_position=2)
+                                                        debug=debug, _errors=_errors, tqdm_position=2,
+                                                        model_args=model_args)
                             if pairwise_clustering_fn.__class__ is HACInference:
                                 clustering_threshold = pairwise_clustering_fn.cut_threshold
                             logger.info(f"Final: test_{list(clustering_metrics)[0]}_{pairwise_clustering_fn_labels[i]}={clustering_scores[0]}, " +

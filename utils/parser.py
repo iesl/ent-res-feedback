@@ -38,6 +38,9 @@ class Parser(argparse.ArgumentParser):
         parser.add_argument(
             "--dataset_name", type=str, help="name of AND dataset that you want to preprocess"
         )
+        parser.add_argument(
+            "--dataset_seed", type=int
+        )
 
     def add_training_args(self):
         """
@@ -94,7 +97,7 @@ class Parser(argparse.ArgumentParser):
             help="Whether to prevent wandb sweep early terminate or not",
         )
         parser.add_argument(
-            "--wandb_max_runs", type=int, default=600,
+            "--wandb_max_runs", type=int, default=120,
             help="Maximum number of runs to try in the sweep",
         )
         parser.add_argument(
