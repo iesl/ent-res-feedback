@@ -51,6 +51,7 @@ def _fork_iter(batch_idx, _fork_id, _shared_list, eval_fn, **kwargs):
     kwargs['device'] = 'cpu'
     kwargs['eval_fn'] = eval_fn
     _proc = Process(target=_run_iter, kwargs=kwargs)
+    logger.info('Forking eval iteration')
     _proc.start()
     return _proc
 
