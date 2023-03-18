@@ -58,7 +58,7 @@ def _fork_iter(batch_idx, _fork_id, _shared_list, eval_fn, **kwargs):
 def evaluate(model, dataloader, overfit_batch_idx=-1, clustering_fn=None, clustering_threshold=None,
              val_dataloader=None, tqdm_label='', device=None, verbose=False, debug=False, _errors=None,
              run_dir='./', tqdm_position=None, model_args=None, return_iter=False, fork_size=500,
-             disable_tqdm=False):
+             max_parallel_forks=5, disable_tqdm=False):
     """
     clustering_fn, clustering_threshold, val_dataloader: unused when pairwise_mode is False
     (only added to keep fn signature identical)
@@ -96,41 +96,41 @@ def evaluate(model, dataloader, overfit_batch_idx=-1, clustering_fn=None, cluste
             # Only one signature in block; manually assign a unique cluster
             pred_cluster_ids = [max_pred_id + 1]
         elif fork_enabled and block_size >= fork_size:
-            _proc = _fork_iter(idx, _fork_id, _shared_list, evaluate, **fn_args)
-            _fork_id += 1
-            _procs.append((_proc, block_size))
-            continue
-        else:
-            # Forward pass through the e2e model
-            data = data.to(device)
-            try:
-                _ = model(data, block_size, verbose=verbose)
-            except CvxpyException as e:
-                logger.info(e)
-                _error_obj = {
-                    'id': f'e_{int(time())}',
-                    'method': 'eval',
-                    'model_type': 'e2e',
-                    'data_split': tqdm_label,
-                    'model_call_args': {
-                        'data': data.detach().tolist(),
-                        'block_size': block_size
-                    },
-                    'cvxpy_layer_args': e.data
-                }
-                if _errors is not None:
-                    _errors.append(_error_obj)
-                    save_to_wandb_run({'errors': _errors}, 'errors.json', run_dir, logger)
-                if not debug:  # if tqdm_label is not 'dev' and not debug:
-                    raise CvxpyException(data=_error_obj)
-                n_exceptions += 1
-                logger.info(f'Caught CvxpyException {n_exceptions}: skipping batch')
+            if (len(_procs) - len(_shared_list)) < max_parallel_forks:
+                _proc = _fork_iter(idx, _fork_id, _shared_list, evaluate, **fn_args)
+                _fork_id += 1
+                _procs.append((_proc, block_size))
                 continue
-            pred_cluster_ids = (model.hac_cut_layer.cluster_labels + (max_pred_id + 1)).tolist()
-            cc_obj_vals['round'].append(model.hac_cut_layer.objective_value)
-            cc_obj_vals['sdp'].append(model.sdp_layer.objective_value)
-            cc_obj_vals['block_idxs'].append(idx)
-            cc_obj_vals['block_sizes'].append(block_size)
+        # Forward pass through the e2e model
+        data = data.to(device)
+        try:
+            _ = model(data, block_size, verbose=verbose)
+        except CvxpyException as e:
+            logger.info(e)
+            _error_obj = {
+                'id': f'e_{int(time())}',
+                'method': 'eval',
+                'model_type': 'e2e',
+                'data_split': tqdm_label,
+                'model_call_args': {
+                    'data': data.detach().tolist(),
+                    'block_size': block_size
+                },
+                'cvxpy_layer_args': e.data
+            }
+            if _errors is not None:
+                _errors.append(_error_obj)
+                save_to_wandb_run({'errors': _errors}, 'errors.json', run_dir, logger)
+            if not debug:  # if tqdm_label is not 'dev' and not debug:
+                raise CvxpyException(data=_error_obj)
+            n_exceptions += 1
+            logger.info(f'Caught CvxpyException {n_exceptions}: skipping batch')
+            continue
+        pred_cluster_ids = (model.hac_cut_layer.cluster_labels + (max_pred_id + 1)).tolist()
+        cc_obj_vals['round'].append(model.hac_cut_layer.objective_value)
+        cc_obj_vals['sdp'].append(model.sdp_layer.objective_value)
+        cc_obj_vals['block_idxs'].append(idx)
+        cc_obj_vals['block_sizes'].append(block_size)
         all_gold += list(np.reshape(cluster_ids, (block_size,)))
         max_pred_id = max(pred_cluster_ids)
         all_pred += list(pred_cluster_ids)
@@ -167,7 +167,8 @@ def evaluate(model, dataloader, overfit_batch_idx=-1, clustering_fn=None, cluste
 def evaluate_pairwise(model, dataloader, overfit_batch_idx=-1, mode="macro", return_pred_only=False,
                       thresh_for_f1=0.5, clustering_fn=None, clustering_threshold=None, val_dataloader=None,
                       tqdm_label='', device=None, verbose=False, debug=False, _errors=None, run_dir='./',
-                      tqdm_position=None, model_args=None, return_iter=False, fork_size=500, disable_tqdm=False):
+                      tqdm_position=None, model_args=None, return_iter=False, fork_size=500, max_parallel_forks=5,
+                      disable_tqdm=False):
     fn_args = locals()
     fork_enabled = fork_size > -1 and model_args is not None
     if fork_enabled:
@@ -206,43 +207,43 @@ def evaluate_pairwise(model, dataloader, overfit_batch_idx=-1, mode="macro", ret
                 # Only one signature in block; manually assign a unique cluster
                 pred_cluster_ids = [max_pred_id + 1]
             elif fork_enabled and block_size >= fork_size and clustering_fn.__class__ is CCInference:
-                _proc = _fork_iter(idx, _fork_id, _shared_list, evaluate_pairwise, **fn_args)
-                _fork_id += 1
-                _procs.append((_proc, block_size))
-                continue
-            else:
-                # Forward pass through the e2e model
-                data = data.to(device)
-                try:
-                    edge_weights = model(data, N=block_size, warmstart=True, verbose=verbose)
-                    pred_cluster_ids = clustering_fn(edge_weights, block_size, min_id=(max_pred_id + 1),
-                                                     threshold=clustering_threshold)
-                except CvxpyException as e:
-                    logger.info(e)
-                    _error_obj = {
-                        'id': f'e_{int(time())}',
-                        'method': 'eval',
-                        'model_type': 'pairwise_cc',
-                        'data_split': tqdm_label,
-                        'model_call_args': {
-                            'data': data.detach().tolist(),
-                            'block_size': block_size
-                        },
-                        'cvxpy_layer_args': e.data
-                    }
-                    if _errors is not None:
-                        _errors.append(_error_obj)
-                        save_to_wandb_run({'errors': _errors}, 'errors.json', run_dir, logger)
-                    if not debug:  # if tqdm_label is not 'dev' and not debug:
-                        raise CvxpyException(data=_error_obj)
-                    n_exceptions += 1
-                    logger.info(f'Caught CvxpyException {n_exceptions}: skipping batch')
+                if (len(_procs) - len(_shared_list)) < max_parallel_forks:
+                    _proc = _fork_iter(idx, _fork_id, _shared_list, evaluate_pairwise, **fn_args)
+                    _fork_id += 1
+                    _procs.append((_proc, block_size))
                     continue
-                if clustering_fn.__class__ is CCInference:
-                    cc_obj_vals['round'].append(clustering_fn.hac_cut_layer.objective_value)
-                    cc_obj_vals['sdp'].append(clustering_fn.sdp_layer.objective_value)
-                    cc_obj_vals['block_idxs'].append(idx)
-                    cc_obj_vals['block_sizes'].append(block_size)
+            # Forward pass through the e2e model
+            data = data.to(device)
+            try:
+                edge_weights = model(data, N=block_size, warmstart=True, verbose=verbose)
+                pred_cluster_ids = clustering_fn(edge_weights, block_size, min_id=(max_pred_id + 1),
+                                                 threshold=clustering_threshold)
+            except CvxpyException as e:
+                logger.info(e)
+                _error_obj = {
+                    'id': f'e_{int(time())}',
+                    'method': 'eval',
+                    'model_type': 'pairwise_cc',
+                    'data_split': tqdm_label,
+                    'model_call_args': {
+                        'data': data.detach().tolist(),
+                        'block_size': block_size
+                    },
+                    'cvxpy_layer_args': e.data
+                }
+                if _errors is not None:
+                    _errors.append(_error_obj)
+                    save_to_wandb_run({'errors': _errors}, 'errors.json', run_dir, logger)
+                if not debug:  # if tqdm_label is not 'dev' and not debug:
+                    raise CvxpyException(data=_error_obj)
+                n_exceptions += 1
+                logger.info(f'Caught CvxpyException {n_exceptions}: skipping batch')
+                continue
+            if clustering_fn.__class__ is CCInference:
+                cc_obj_vals['round'].append(clustering_fn.hac_cut_layer.objective_value)
+                cc_obj_vals['sdp'].append(clustering_fn.sdp_layer.objective_value)
+                cc_obj_vals['block_idxs'].append(idx)
+                cc_obj_vals['block_sizes'].append(block_size)
             all_gold += list(np.reshape(cluster_ids, (block_size,)))
             max_pred_id = max(pred_cluster_ids)
             all_pred += list(pred_cluster_ids)
