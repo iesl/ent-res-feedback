@@ -927,19 +927,24 @@ def pointwise_featurize(
     """
     le_signature_feature_set = preprocessing.LabelEncoder()
     le_signature_feature_set.fit(list(signature_feature_set))
+
+    # I am using this for easy retrieval for training, val and test block retrieval. 
+    le_signature_dict = preprocessing.LabelEncoder()
+    le_signature_dict.fit(list(signature_dict.keys()))
     
     point_features_row, point_features_col, point_features_data = [], [], []
     num_points = len(signature_dict.keys())
     num_feats = len(signature_feature_set)   
     
-    for index, (_, values) in tqdm(enumerate(signature_dict.items()), desc="Converting to spare matrix"):
+    for _, (key, values) in tqdm(enumerate(signature_dict.items()), desc="Converting to sparse matrix"):
         encoded_signature_features = le_signature_feature_set.transform(values)
+        encoded_key_val = le_signature_dict.transform([key])[0]
         for feature_label in encoded_signature_features :
-            point_features_row.append(index)
+            point_features_row.append(encoded_key_val)
             point_features_col.append(feature_label)
             point_features_data.append(1)
                           
-    return point_features_row, point_features_col, point_features_data, num_feats, num_points
+    return point_features_row, point_features_col, point_features_data, num_feats, num_points, le_signature_dict
             
 
 def store_featurized_pickles(

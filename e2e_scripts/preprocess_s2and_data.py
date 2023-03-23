@@ -16,14 +16,15 @@ from utils.parser import Parser
 from s2and.data import ANDData
 import logging
 from s2and.featurizer import FeaturizationInfo, featurize
+from preprocess_s2and_pointwise import save_pickled_pointwise_features
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def save_blockwise_featurized_data(dataset_name, random_seed):
-    parent_dir = f"{DATA_HOME_DIR}/{dataset_name}"
+def save_blockwise_featurized_data(data_home_dir, dataset_name, random_seed):
+    parent_dir = f"{data_home_dir}/{dataset_name}"
     AND_dataset = ANDData(
         signatures=join(parent_dir, f"{dataset_name}_signatures.json"),
         papers=join(parent_dir, f"{dataset_name}_papers.json"),
@@ -115,13 +116,17 @@ if __name__=='__main__':
     print(args)
 
     params = args.__dict__
-    DATA_HOME_DIR = params["data_home_dir"]
+    data_home_dir = params["data_home_dir"]
     dataset = params["dataset_name"]
 
     random_seeds = {1, 2, 3, 4, 5}
     for seed in random_seeds:
         print("Preprocessing started for seed value", seed)
-        save_blockwise_featurized_data(dataset, seed)
+        # Create the AND Dataset for the particular seed. (write a function let it be in train_utils.py 
+        # Provide the AND Dataset to the functions : save_pickled_pointwise_features and save_blockwise_featurized_data 
+        #save_blockwise_featurized_data(data_home_dir, dataset, seed)
+        save_pickled_pointwise_features(data_home_dir, dataset, seed)
+        
 
         # Check the pickles are created OK
         train_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset}/seed{seed}/train_features.pkl"
@@ -130,6 +135,3 @@ if __name__=='__main__':
         blockwise_features = read_blockwise_features(train_pkl)
         find_total_num_train_pairs(blockwise_features)
         #verify_diff_with_s2and(dataset, seed)
-
-
-
