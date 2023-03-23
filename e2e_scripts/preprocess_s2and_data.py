@@ -39,11 +39,13 @@ def save_featurized_data(data_home_dir, dataset_name, random_seed, point_feature
         n_jobs=16,
         random_seed=random_seed,
     )
-
+    logger.info("Loaded ANDData object")
     # Load the featurizer, which calculates pairwise similarity scores
     featurization_info = FeaturizationInfo()
-    # the cache will make it faster to train multiple times - it stores the features on disk for you
+    logger.info("Loaded featurization info")
+
     save_pickled_pointwise_features(AND_dataset, point_features_mat, le_signatures, random_seed)
+
     train_pkl, val_pkl, test_pkl = store_featurized_pickles(AND_dataset,
                                                             featurization_info,
                                                             n_jobs=16,
@@ -121,7 +123,7 @@ if __name__=='__main__':
     
     point_features_mat, le_signatures = create_signature_features_matrix(data_home_dir, dataset)
 
-    random_seeds = {1, 2, 3, 4, 5}
+    random_seeds = [1, 2, 3, 4, 5] if params["dataset_seed"] is None else [params["dataset_seed"]]
     for seed in random_seeds:
         print("Preprocessing started for seed value", seed)
         save_featurized_data(data_home_dir, dataset, seed, point_features_mat, le_signatures)
