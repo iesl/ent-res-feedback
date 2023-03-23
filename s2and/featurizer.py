@@ -10,6 +10,7 @@ import logging
 from collections import Counter
 from collections.abc import Iterable
 from IPython import embed
+from scipy.sparse import csr_matrix, coo_matrix
 
 from sklearn import preprocessing
 
@@ -839,7 +840,7 @@ def pointwise_featurize(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ):
     """
-    Featurizes the input dataset and stores as a unified pickle file. 
+    Extarct Pointwise Features from the dataset. 
 
     Parameters
     ----------
@@ -855,16 +856,15 @@ def pointwise_featurize(
     Returns
     -------
     Returns the three items : 
-    1. Row indices of the sparse matrix containing the data
-    2. Column indices of the sparse matrix containing the data
-    3. The data to be filled in the given row and column combination.
+    1. Sparse matrix poitwise feature representation of all the signatures in a dataset.
+    2. Label encoder to index signature according to their ids
     """
     # Do you think OrderedSet and OrderedDict should be used here? 
     signature_feature_set = set() # The feature is stored a str and not tuple to facilitate label encoding.
     signature_dict = {}
     
     # We dont need to iterate signature per block as we need to create for all the signatures irrespective of the block.
-
+    logger.info('Creating signatures feature set...')
     for signature_key, values in dataset.signatures.items():
         per_signature_features = dataset.signatures[signature_key]._asdict()
         signature_dict[signature_key] = []
@@ -915,7 +915,9 @@ def pointwise_featurize(
                 print('\n!!!! Found another type !!!!\n')
                 embed()
                 exit()
-    logger.info('Label encoding the values')
+    logger.info('Created signatures feature set...')
+    
+    logger.info('Label encoding signature features...')
     # Label encoding code --- 
     
     """"
@@ -927,7 +929,7 @@ def pointwise_featurize(
     """
     le_signature_feature_set = preprocessing.LabelEncoder()
     le_signature_feature_set.fit(list(signature_feature_set))
-
+    
     # I am using this for easy retrieval for training, val and test block retrieval. 
     le_signature_dict = preprocessing.LabelEncoder()
     le_signature_dict.fit(list(signature_dict.keys()))
@@ -936,15 +938,22 @@ def pointwise_featurize(
     num_points = len(signature_dict.keys())
     num_feats = len(signature_feature_set)   
     
-    for _, (key, values) in tqdm(enumerate(signature_dict.items()), desc="Converting to sparse matrix"):
+    for key, values in tqdm(signature_dict.items(), desc="Converting to spare matrix"):
         encoded_signature_features = le_signature_feature_set.transform(values)
         encoded_key_val = le_signature_dict.transform([key])[0]
         for feature_label in encoded_signature_features :
             point_features_row.append(encoded_key_val)
             point_features_col.append(feature_label)
             point_features_data.append(1)
-                          
-    return point_features_row, point_features_col, point_features_data, num_feats, num_points, le_signature_dict
+    logger.info('Label encoding completed...')
+    
+    logger.info('converting feature indices to csr_matrix')
+    point_features = coo_matrix(
+            (point_features_data, (point_features_row, point_features_col)),
+            shape=(num_points, num_feats)
+    ).tocsr()
+    print("Matrix creation done.")                      
+    return point_features, le_signature_dict
             
 
 def store_featurized_pickles(

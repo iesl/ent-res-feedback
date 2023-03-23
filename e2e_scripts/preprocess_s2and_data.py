@@ -16,14 +16,14 @@ from utils.parser import Parser
 from s2and.data import ANDData
 import logging
 from s2and.featurizer import FeaturizationInfo, featurize
-from preprocess_s2and_pointwise import save_pickled_pointwise_features
+from preprocess_s2and_pointwise import save_pickled_pointwise_features, create_signature_features_matrix
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s', datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def save_blockwise_featurized_data(data_home_dir, dataset_name, random_seed):
+def save_featurized_data(data_home_dir, dataset_name, random_seed, point_features_mat, le_signatures):
     parent_dir = f"{data_home_dir}/{dataset_name}"
     AND_dataset = ANDData(
         signatures=join(parent_dir, f"{dataset_name}_signatures.json"),
@@ -43,6 +43,7 @@ def save_blockwise_featurized_data(data_home_dir, dataset_name, random_seed):
     # Load the featurizer, which calculates pairwise similarity scores
     featurization_info = FeaturizationInfo()
     # the cache will make it faster to train multiple times - it stores the features on disk for you
+    save_pickled_pointwise_features(AND_dataset, point_features_mat, le_signatures, random_seed)
     train_pkl, val_pkl, test_pkl = store_featurized_pickles(AND_dataset,
                                                             featurization_info,
                                                             n_jobs=16,
@@ -65,8 +66,8 @@ def find_total_num_train_pairs(blockwise_data):
     for block_id in blockwise_data.keys():
         count += len(blockwise_data[block_id][0])
 
-    print("Total num of signature pairs", count)
-
+    print("Total num of signature pairs", count)    
+    
 # def verify_diff_with_s2and(dataset_name, random_seed):
 #     parent_dir = f"{DATA_HOME_DIR}/{dataset_name}"
 #     AND_dataset = ANDData(
@@ -105,7 +106,6 @@ def find_total_num_train_pairs(blockwise_data):
 #
 #     print("VERIFICATION STATUS: ", s2and_set==our_set)
 
-
 if __name__=='__main__':
     # Creates the pickles that store the preprocessed data
     # Read cmd line args
@@ -118,14 +118,13 @@ if __name__=='__main__':
     params = args.__dict__
     data_home_dir = params["data_home_dir"]
     dataset = params["dataset_name"]
+    
+    point_features_mat, le_signatures = create_signature_features_matrix(data_home_dir, dataset)
 
     random_seeds = {1, 2, 3, 4, 5}
     for seed in random_seeds:
         print("Preprocessing started for seed value", seed)
-        # Create the AND Dataset for the particular seed. (write a function let it be in train_utils.py 
-        # Provide the AND Dataset to the functions : save_pickled_pointwise_features and save_blockwise_featurized_data 
-        #save_blockwise_featurized_data(data_home_dir, dataset, seed)
-        save_pickled_pointwise_features(data_home_dir, dataset, seed)
+        save_featurized_data(data_home_dir, dataset, seed, point_features_mat, le_signatures)
         
 
         # Check the pickles are created OK
