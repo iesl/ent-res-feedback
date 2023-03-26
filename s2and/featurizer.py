@@ -871,6 +871,7 @@ def pointwise_featurize(
         for feature_key, value in per_signature_features.items():
             index_key = None
             
+            # TODO : WHy to ignore this?
             features_to_ignore = [
                     'author_info_name_counts',
                     'author_info_position',
@@ -896,6 +897,8 @@ def pointwise_featurize(
                 pass
             
             # Let us check the type of value for each signatures. 
+            # This will go through each signature and depending on the type of key in the 
+            # key-val pair, flatens it and is used a single feature to create a sparse matrix.
             
             if isinstance(value, str) or isinstance(value, int):
                 index_key = str((feature_key, value))
@@ -938,7 +941,7 @@ def pointwise_featurize(
     num_points = len(signature_dict.keys())
     num_feats = len(signature_feature_set)   
     
-    for key, values in tqdm(signature_dict.items(), desc="Converting to spare matrix"):
+    for key, values in tqdm(signature_dict.items(), desc="Converting to sparse matrix"):
         encoded_signature_features = le_signature_feature_set.transform(values)
         encoded_key_val = le_signature_dict.transform([key])[0]
         for feature_label in encoded_signature_features :

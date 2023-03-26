@@ -34,6 +34,7 @@ def save_pickled_pointwise_features(AND_dataset, sparse_matrix,
     """
     
     if random_seed:
+        # This splits the signatures per three different blocks
         train_block, val_block, test_block = AND_dataset.split_cluster_signatures()
 
         train_pointwise_features = {}
@@ -41,7 +42,8 @@ def save_pickled_pointwise_features(AND_dataset, sparse_matrix,
         test_pointwise_features = {}
 
         # The above three should have a key-list(val) (where val is a list of signature IDs) under them. 
-
+        # Below three for loops go through the blocks, gets the corresponding row index of the signature 
+        # from the label encoder, splices the matrix with only those rows and stores per block.
         # Doing for training block : 
         for block_id, list_of_signatures in train_block.items():
             # Let us transform each of those using label encoder and index them from the sparse matrix.
@@ -78,7 +80,7 @@ def save_pickled_pointwise_features(AND_dataset, sparse_matrix,
         processed_data['mention_level_features'] = point_features_mat
 
         logger.info('Dumping processed data')
-        file_name = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/{dataset_name}_all_signature_features.pkl"
+        file_name = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/{AND_dataset.name}_all_signature_features.pkl"
 
         with open(file_name, 'wb') as f:
             pickle.dump(processed_data, f)

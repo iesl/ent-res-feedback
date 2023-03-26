@@ -15,6 +15,7 @@ from utils.parser import Parser
 
 from s2and.data import ANDData
 import logging
+import json
 from s2and.featurizer import FeaturizationInfo, featurize
 from preprocess_s2and_pointwise import save_pickled_pointwise_features, create_signature_features_matrix
 
@@ -22,6 +23,42 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def validate_pointwise_featurizer(dataset, pointwise_matrix, le_signature_ids):
+    # This function is here to validate two things : 
+    # 1. Whether the length of the signtaures in the matrix is same as the length of the json file. 
+    #   Also the block id. 
+    # 2. Check whether the order is the same between the json file and the matrix.
+    #   The order needs to be checked on block level as well as the signature level. 
+
+    print("### --- Validating the pointwise matrix creation")
+    print("The shape of the matrix : ",pointwise_matrix.shape)
+    file_signature_location= f"../data/{dataset.name}/{dataset.name}_signatures.json"
+    with open(file_signature_location, 'r') as myfile:
+        data=myfile.read() 
+    dict_obj = json.loads(data)
+    file_keys = list(dict_obj.keys())
+    print("Length of the signatures file : ", len(dict_obj))
+    print("### -- Validating the signature order. ")
+    indices = list(range(pointwise_matrix.shape[0]))
+    inverse_transformed_signature_ids = list(le_signature_ids.inverse_transform(indices))
+    ordered = True
+    length = len(dict_obj)
+    if len(dict_obj) == pointwise_matrix.shape[0]:
+        print("The lengths are same")
+        index = 0
+        while (ordered and index < length):
+            if inverse_transformed_signature_ids[index] == file_keys[index]:
+                index += 1
+            else:
+                print("inverse_transformed_signature_ids[index] :", inverse_transformed_signature_ids[index])
+                print("file_keys[index] : ", file_keys[index])
+                ordered = False
+                print("The order is not same")
+        if ordered:
+            print("The order is same.")
+        
+    else:
+        print("The lengths are not same..")
 
 def save_featurized_data(data_home_dir, dataset_name, random_seed, point_features_mat, le_signatures):
     parent_dir = f"{data_home_dir}/{dataset_name}"
@@ -45,6 +82,8 @@ def save_featurized_data(data_home_dir, dataset_name, random_seed, point_feature
     logger.info("Loaded featurization info")
 
     save_pickled_pointwise_features(AND_dataset, point_features_mat, le_signatures, random_seed)
+
+    validate_pointwise_featurizer(AND_dataset, point_features_mat, le_signatures)
 
     train_pkl, val_pkl, test_pkl = store_featurized_pickles(AND_dataset,
                                                             featurization_info,
@@ -123,6 +162,17 @@ if __name__=='__main__':
     
     point_features_mat, le_signatures = create_signature_features_matrix(data_home_dir, dataset)
 
+    # Added this for speeding up while testing.
+    matrix_pickle_file_location = "./matrix_pickle.pkl"
+
+    with open(matrix_pickle_file_location,"wb") as _pkl_file:
+        pickle.dump((point_features_mat, le_signatures), _pkl_file)
+
+    """
+    with open(matrix_pickle_file_location, 'rb') as f:
+        point_features_mat, le_signatures = pickle.load(f)
+    """
+    
     random_seeds = [1, 2, 3, 4, 5] if params["dataset_seed"] is None else [params["dataset_seed"]]
     for seed in random_seeds:
         print("Preprocessing started for seed value", seed)
