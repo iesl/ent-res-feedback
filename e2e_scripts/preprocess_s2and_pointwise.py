@@ -61,12 +61,12 @@ def save_pickled_pointwise_features(AND_dataset, sparse_matrix,
             encoded_signature_id_list = label_encoder_signatures.transform(list_of_signatures)
             test_pointwise_features[block_id] = sparse_matrix[encoded_signature_id_list, :]
 
-        if(not os.path.exists(f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/seed{random_seed}")):
-            os.makedirs(f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/seed{random_seed}")
+        if(not os.path.exists(f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/pointwise/seed{random_seed}")):
+            os.makedirs(f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/pointwise/seed{random_seed}")
 
-        train_pkl = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/seed{random_seed}/train_signature_features.pkl"
-        val_pkl = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/seed{random_seed}/val_signature_features.pkl"
-        test_pkl = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/seed{random_seed}/test_signature_features.pkl"
+        train_pkl = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/pointwise/seed{random_seed}/train_signature_features.pkl"
+        val_pkl = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/pointwise/seed{random_seed}/val_signature_features.pkl"
+        test_pkl = f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/pointwise/seed{random_seed}/test_signature_features.pkl"
 
         with open(train_pkl,"wb") as _pkl_file:
             pickle.dump(train_pointwise_features, _pkl_file)
@@ -119,6 +119,16 @@ def create_signature_features_matrix(data_home_dir, dataset_name):
     point_features_mat, le_signatures = pointwise_featurize(AND_dataset,
                                                           n_jobs=16,
                                                         use_cache=False)
+    
+    matrix_pickle_file_location = f'preprocess_matrix_{dataset_name}.pkl'
+    print("Storing pickled matrix ....")
+    with open(matrix_pickle_file_location, 'wb') as f:
+        pickle.dump((point_features_mat, le_signatures), f)
+
+    print("### loading from pickle")
+    with open(matrix_pickle_file_location, 'rb') as f:
+        point_features_mat, le_signatures = pickle.load(f)
+    
     
     logger.info("Signature features pre-procesing completed")
     return point_features_mat, le_signatures
