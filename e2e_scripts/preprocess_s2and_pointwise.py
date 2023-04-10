@@ -48,18 +48,18 @@ def save_pickled_pointwise_features(AND_dataset, sparse_matrix,
         for block_id, list_of_signatures in train_block.items():
             # Let us transform each of those using label encoder and index them from the sparse matrix.
             encoded_signature_id_list = label_encoder_signatures.transform(list_of_signatures)
-            train_pointwise_features[block_id] = sparse_matrix[encoded_signature_id_list, :]
+            train_pointwise_features[block_id] = (list_of_signatures, sparse_matrix[encoded_signature_id_list, :])
 
         # Doing for validation block : 
         for block_id, list_of_signatures in val_block.items():
             # Let us transform each of those using label encoder and index them from the sparse matrix.
             encoded_signature_id_list = label_encoder_signatures.transform(list_of_signatures)
-            validation_pointwise_features[block_id] = sparse_matrix[encoded_signature_id_list, :]
+            validation_pointwise_features[block_id] = (list_of_signatures, sparse_matrix[encoded_signature_id_list, :])
 
         for block_id, list_of_signatures in test_block.items():
             # Let us transform each of those using label encoder and index them from the sparse matrix.
             encoded_signature_id_list = label_encoder_signatures.transform(list_of_signatures)
-            test_pointwise_features[block_id] = sparse_matrix[encoded_signature_id_list, :]
+            test_pointwise_features[block_id] = (list_of_signatures, sparse_matrix[encoded_signature_id_list, :])
 
         if(not os.path.exists(f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/pointwise/seed{random_seed}")):
             os.makedirs(f"{PREPROCESSED_DATA_DIR}/{AND_dataset.name}/pointwise/seed{random_seed}")
