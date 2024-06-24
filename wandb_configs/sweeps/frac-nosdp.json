@@ -10,6 +10,7 @@
     "lr_scheduler": {"value": "plateau"},
     "activation": {"values": ["leaky_relu"]},
     "use_rounded_loss": {"value": false},
+    "use_sdp": {"value":  false},
     "gradient_accumulation": {"values":  [true, false]},
     "weighted_loss": {"values":  [true, false]}
 }

@@ -13,7 +13,7 @@ class HACCutLayer(torch.nn.Module):
     Takes fractional SDP output as input, and simultaneously builds & cuts avg. HAC tree to get rounded solution.
     Executes straight-through estimator as the backward pass.
     """
-    def get_rounded_solution(self, X, weights, _MAX_DIST=10, use_similarities=True, max_similarity=1, verbose=False):
+    def get_rounded_solution(self, X, weights, _MAX_DIST=1000, use_similarities=True, max_similarity=1, verbose=False):
         """
         X is a symmetric NxN matrix of fractional, decision values with a 1-diagonal (output from the SDP layer)
         weights is an NxN upper-triangular (shift 1) matrix of edge weights
@@ -34,7 +34,8 @@ class HACCutLayer(torch.nn.Module):
         round_matrix = torch.eye(D, device=device)
 
         # Take the upper triangular and mask the other values with a large number
-        Y = _MAX_DIST * torch.ones(D, D, device=device).tril() + (max_similarity-X if use_similarities else X).triu(1)
+        _MAX_DIST = torch.max(torch.abs(X)) * _MAX_DIST
+        Y = _MAX_DIST * torch.ones(D, D, device=device).tril() + (max_similarity - X if use_similarities else X).triu(1)
         # Compute the dissimilarity minima per row
         values, indices = torch.min(Y, dim=1)
 
@@ -100,7 +101,7 @@ class HACCutLayer(torch.nn.Module):
             # Energy calculations
             clustering[max_node] = clustering[parent_1] + clustering[parent_2]
             leaf_indices = torch.where(clustering[max_node])[0]
-            leaf_edges = torch.meshgrid(leaf_indices, leaf_indices)
+            leaf_edges = torch.meshgrid(leaf_indices, leaf_indices, indexing='ij')
             energy[max_node] = energy[parent_1] + energy[parent_2]
             merge_energy = torch.sum(weights[leaf_edges])
             if merge_energy >= energy[max_node]:
@@ -123,9 +124,16 @@ class HACCutLayer(torch.nn.Module):
         self.round_matrix = round_matrix
         self.cluster_labels = clustering[-1]
         self.parents = parents
-        objective_matrix = weights * torch.triu(round_matrix, diagonal=1)
-        self.objective_value = (energy[max_node] - torch.sum(objective_matrix[objective_matrix < 0])).item()  # MA
+        with torch.no_grad():
+            objective_matrix = weights * torch.triu(round_matrix, diagonal=1)
+            self.objective_value = (energy[max_node] - torch.sum(objective_matrix[objective_matrix < 0])).item()  # MA
         return self.round_matrix
 
-    def forward(self, X, W, use_similarities=True):
-        return X + (self.get_rounded_solution(X, W, use_similarities=use_similarities) - X).detach()
+    def forward(self, X, W, use_similarities=True, return_triu=False):
+        solution = X + (self.get_rounded_solution(X, W,
+                                                  use_similarities=use_similarities,
+                                                  max_similarity=torch.max(X)) - X).detach()
+        if return_triu:
+            triu_indices = torch.triu_indices(len(solution), len(solution), offset=1)
+            return solution[triu_indices[0], triu_indices[1]]
+        return solution

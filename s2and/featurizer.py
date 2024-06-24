@@ -8,6 +8,12 @@ import numpy as np
 import functools
 import logging
 from collections import Counter
+from collections.abc import Iterable
+from collections import OrderedDict
+from IPython import embed
+from scipy.sparse import csr_matrix, coo_matrix
+
+from sklearn import preprocessing
 
 from tqdm import tqdm
 
@@ -825,6 +831,164 @@ def featurize(
         logger.info("featurized test")
         return train_features, val_features, test_features
 
+
+
+    
+def pointwise_featurize(
+    dataset: ANDData,
+    n_jobs: int = 1,
+    use_cache: bool = False,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+):
+    """
+    Extarct Pointwise Features from the dataset. 
+
+    Parameters
+    ----------
+    dataset: ANDData
+        the dataset containing the relevant data
+    n_jobs: int
+        the number of cpus to use
+    use_cache: bool
+        whether or not to use write to/read from the features cache
+    chunk_size: int
+        the chunk size for multiprocessing
+
+    Returns
+    -------
+    Returns the three items : 
+    1. Sparse matrix pointwise feature representation of all the signatures in a dataset.
+    2. Label encoder to index signature according to their ids
+    """
+    # Do you think OrderedSet and OrderedDict should be used here? 
+    # I am using this to facilitate the order to be maintained. 
+    # signature_feature_dict is facilitating an ordered set storage by using an ordered dict
+    # and is used to store the feature
+    #  signature_dict - Is an ordered storage of Signature IDs. 
+    signature_feature_dict = OrderedDict() # The feature is stored a str and not tuple to facilitate label encoding.
+    signature_dict = OrderedDict()
+    
+    # We dont need to iterate signature per block as we need to create for all the signatures irrespective of the block.
+    logger.info('Creating signatures feature set...')
+    for signature_key, values in dataset.signatures.items():
+        per_signature_features = dataset.signatures[signature_key]._asdict()
+        signature_dict[signature_key] = []
+        for feature_key, value in per_signature_features.items():
+            index_key = None
+            
+            # TODO : WHy to ignore this?
+            features_to_ignore = [
+                    'author_info_name_counts',
+                    'author_info_position',
+                    'author_info_block',
+                    'author_info_given_block',
+                    'paper_id',
+                    'author_id',
+                    'sourced_author_source',
+                    'sourced_author_ids',
+            ]
+            if feature_key in features_to_ignore:
+                continue
+                
+            if (value is None
+                    or (isinstance(value, Iterable) and len(value) == 0)):
+                continue
+            try:
+                if np.isnan(value):
+                    print('\n!!!! Found a NaN !!!!\n')
+                    exit()
+                    continue
+            except:
+                pass
+            
+            # Let us check the type of value for each signatures. 
+            # This will go through each signature and depending on the type of key in the 
+            # key-val pair, flatens it and is used a single feature to create a sparse matrix.
+            
+            if isinstance(value, str) or isinstance(value, int):
+                index_key = str((feature_key, value))
+                #signature_feature_set.add(index_key) # Converting to str from tuple.
+                if index_key not in signature_feature_dict:
+                    signature_feature_dict[index_key] = None
+                signature_dict[signature_key].append(index_key)
+            elif isinstance(value, Counter):
+                for val in value.keys():
+                    index_key = str((feature_key, val))
+                    #signature_feature_set.add(index_key)
+                    if index_key not in signature_feature_dict:
+                        signature_feature_dict[index_key] = None
+                    signature_dict[signature_key].append(index_key)
+            elif isinstance(value, Iterable):
+                for val in value:
+                    index_key = str((feature_key, val))
+                    #signature_feature_set.add(index_key)
+                    if index_key not in signature_feature_dict:
+                        signature_feature_dict[index_key] = None
+                    signature_dict[signature_key].append(index_key)
+            else:
+                print('\n!!!! Found another type !!!!\n')
+                embed()
+                exit()
+    logger.info('Created signatures feature set...')
+    
+    logger.info('Label encoding signature features...')
+    # Label encoding code --- 
+    
+    """"
+    {
+        "signature_id_one" : [(feat_key_1, val_1), (feat_key_2, val_2) ...],
+        "signature_id_two" : [(feat_key_1, val_1), (feat_key_3, val_3) ...]
+        
+    }
+    """
+    # Before label encoding, I am converting the signature_set
+    # (which was a ordered dict into a list of signature by just getting the keys)
+    signature_feature_set = list(signature_feature_dict.keys()) 
+
+    le_signature_feature_set = preprocessing.LabelEncoder()
+    le_signature_feature_set.fit(signature_feature_set)
+    
+    # I am using this for easy retrieval for training, val and test block retrieval. 
+    le_signature_dict = preprocessing.LabelEncoder()
+    le_signature_dict.fit(list(signature_dict.keys()))
+    
+    point_features_row, point_features_col, point_features_data = [], [], []
+    num_points = len(signature_dict.keys())
+    num_feats = len(signature_feature_set)   
+    
+    for key, values in tqdm(signature_dict.items(), desc="Converting to sparse matrix"):
+        encoded_signature_features = le_signature_feature_set.transform(values)
+        encoded_key_val = le_signature_dict.transform([key])[0]
+        for feature_label in encoded_signature_features :
+            point_features_row.append(encoded_key_val)
+            point_features_col.append(feature_label)
+            point_features_data.append(1)
+    logger.info('Label encoding completed...')
+    
+    logger.info('converting feature indices to csr_matrix')
+    point_features = coo_matrix(
+            (point_features_data, (point_features_row, point_features_col)),
+            shape=(num_points, num_feats)
+    ).tocsr()
+    print("Matrix creation done.")                      
+    return point_features, le_signature_dict
+            
+def create_pointwise_block(object_list, pointwise_matrix, le_signatures):
+    # So object_list contains a dict of blocks and signatures. 
+    # So we get the same block as key, get the signature IDs from the values and use the label
+    # encoder to get the corresponding indices and extract the indices from the pointwise matrix. 
+
+    pointwise_featurize = {}
+    for key, val in object_list.items():
+        # here val is a list of signature objects. 
+        # get the ID from each of them. 
+        signatures_ids = [sig.signature_id for sig in val]
+        encoded_signature_id_list = le_signatures.transform(signatures_ids)
+        pointwise_featurize[key] = (signatures_ids, pointwise_matrix[encoded_signature_id_list, :])
+
+    return pointwise_featurize
+
+
 def store_featurized_pickles(
     dataset: ANDData,
     featurizer_info: FeaturizationInfo,
@@ -835,6 +999,8 @@ def store_featurized_pickles(
     nan_value: float = np.nan,
     delete_training_data: bool = False,
     random_seed: int = 1,
+    pointwise_matrix = None,
+    le_signatures = None,
 ) -> Union[Tuple[TupleOfArrays, TupleOfArrays, TupleOfArrays], TupleOfArrays]:
     """
     Featurizes the input dataset and stores as preprocessed data in pickle files
@@ -985,18 +1151,41 @@ def store_featurized_pickles(
         val_signatures_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset.name}/seed{random_seed}/val_signatures.pkl"
         test_signatures_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset.name}/seed{random_seed}/test_signatures.pkl"
 
+        train_object_list: Dict[str, List[Signature]] = dataset.get_signature_objects(train_signatures)
+        val_object_list: Dict[str, List[Signature]] = dataset.get_signature_objects(val_signatures)
+        test_object_list: Dict[str, List[Signature]] = dataset.get_signature_objects(test_signatures)
+
         if(not os.path.isfile(train_signatures_pkl)):
-            train_object_list: Dict[str, List[Signature]] = dataset.get_signature_objects(train_signatures)
+            #train_object_list = dataset.get_signature_objects(train_signatures)
             with open(train_signatures_pkl, "wb") as _pkl_file:
                 pickle.dump(train_object_list, _pkl_file)
 
-            val_object_list: Dict[str, List[Signature]] = dataset.get_signature_objects(val_signatures)
+            #val_object_list = dataset.get_signature_objects(val_signatures)
             with open(val_signatures_pkl, "wb") as _pkl_file:
                 pickle.dump(val_object_list, _pkl_file)
 
-            test_object_list: Dict[str, List[Signature]] = dataset.get_signature_objects(test_signatures)
+            #test_object_list = dataset.get_signature_objects(test_signatures)
             with open(test_signatures_pkl, "wb") as _pkl_file:
                 pickle.dump(test_object_list, _pkl_file)
 
+        # Now utlize this in-creating the blockwise, train, test and Val pair of pointwise features per block.
 
+        train_pointwise_features = create_pointwise_block(train_object_list, pointwise_matrix, le_signatures)
+        validation_pointwise_features = create_pointwise_block(val_object_list, pointwise_matrix, le_signatures)
+        test_pointwise_features = create_pointwise_block(test_object_list, pointwise_matrix, le_signatures)
+
+
+        if(not os.path.exists(f"{PREPROCESSED_DATA_DIR}/{dataset.name}/pointwise/seed{random_seed}")):
+            os.makedirs(f"{PREPROCESSED_DATA_DIR}/{dataset.name}/pointwise/seed{random_seed}")
+
+        train_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset.name}/pointwise/seed{random_seed}/train_signature_features.pkl"
+        val_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset.name}/pointwise/seed{random_seed}/val_signature_features.pkl"
+        test_pkl = f"{PREPROCESSED_DATA_DIR}/{dataset.name}/pointwise/seed{random_seed}/test_signature_features.pkl"
+
+        with open(train_pkl,"wb") as _pkl_file:
+            pickle.dump(train_pointwise_features, _pkl_file)
+        with open(val_pkl,"wb") as _pkl_file:
+            pickle.dump(validation_pointwise_features, _pkl_file)
+        with open(test_pkl,"wb") as _pkl_file:
+            pickle.dump(test_pointwise_features, _pkl_file)
         return train_pkl, val_pkl, test_pkl

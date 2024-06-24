@@ -38,6 +38,9 @@ class Parser(argparse.ArgumentParser):
         parser.add_argument(
             "--dataset_name", type=str, help="name of AND dataset that you want to preprocess"
         )
+        parser.add_argument(
+            "--dataset_seed", type=int
+        )
 
     def add_training_args(self):
         """
@@ -94,7 +97,7 @@ class Parser(argparse.ArgumentParser):
             help="Whether to prevent wandb sweep early terminate or not",
         )
         parser.add_argument(
-            "--wandb_max_runs", type=int, default=600,
+            "--wandb_max_runs", type=int, default=120,
             help="Maximum number of runs to try in the sweep",
         )
         parser.add_argument(
@@ -126,6 +129,10 @@ class Parser(argparse.ArgumentParser):
             help="Run script in inference-only mode on a particular data split (train / dev / test)",
         )
         parser.add_argument(
+            "--eval_all", action='store_true',
+            help="Evaluate model using all inference methods over the test set and exit",
+        )
+        parser.add_argument(
             "--skip_initial_eval", action='store_true',
             help="Whether to skip dev evaluation before training starts",
         )
@@ -133,4 +140,24 @@ class Parser(argparse.ArgumentParser):
             "--pairwise_eval_clustering", type=str,
             help="(only in --pairwise_mode) Whether to run clustering during --eval_only_split and final test eval. " +
             "Accepts 'cc' for correlation clustering, 'hac' for agglomerative clustering, and 'both' to run both.",
+        )
+        parser.add_argument(
+            "--debug", action="store_true",
+            help="Enable debugging mode, where train-eval flows do not quit on known errors in order to allow tracking",
+        )
+        parser.add_argument(
+            "--no_error_tracking", action="store_true",
+            help="Disable error logging for SDP forward and backward passes",
+        )
+        parser.add_argument(
+            "--local", action="store_true",
+            help="Run script with wandb disabled",
+        )
+        parser.add_argument(
+            "--sync_dev", action="store_true",
+            help="Whether to force dev evaluations to run synchronously",
+        )
+        parser.add_argument(
+            "--icml_final_eval", action="store_true",
+            help="ICML REBUTTAL ONLY: Run all eval after training",
         )
